@@ -38,7 +38,7 @@ Algoritmo:
 ## 🏗️ Estructura del proyecto
 
 ```
-mobile/
+MedidorDeGasLP/
 ├── app/
 │   ├── _layout.tsx          # Root layout (DB init, onboarding check)
 │   ├── onboarding.tsx       # Configuración inicial

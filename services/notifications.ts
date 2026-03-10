@@ -61,7 +61,7 @@ export async function programarRecordatorio(
     const id = await Notifications.scheduleNotificationAsync({
         content: {
             title: '🔥 Recordatorio de Gas LP',
-            body: `Te quedan aproximadamente ${diasAntes} días de gas. ¡Es momento de agendar tu recarga!`,
+            body: `Te quedan aproximadamente ${diasAntes} días de gas. ¡Es momento de agendar tu recarga! (No olvides tomar foto a tu tanque para verificar la carga).`,
             data: { tipo: 'recordatorio_gas' },
         },
         trigger: {

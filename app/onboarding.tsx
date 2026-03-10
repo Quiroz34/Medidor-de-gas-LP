@@ -15,6 +15,28 @@ export default function OnboardingScreen() {
     const [personas, setPersonas] = useState('3');
     const [alertaDias, setAlertaDias] = useState('3');
 
+    // Nuevos campos
+    const [cargaHabitual, setCargaHabitual] = useState('');
+    const [frecuenciaCarga, setFrecuenciaCarga] = useState('');
+
+    // Opciones Tipo Uso
+    const [tipoUso, setTipoUso] = useState<'casa' | 'negocio' | null>(null);
+
+    // Campos Casa
+    const [vecesCocina, setVecesCocina] = useState('2');
+    const [minutosCocina, setMinutosCocina] = useState('60');
+    const [personasBaño, setPersonasBaño] = useState('3');
+    const [tiempoBaño, setTiempoBaño] = useState('15');
+
+    // Campos Negocio
+    const [tipoNegocio, setTipoNegocio] = useState('');
+    const [quemadores, setQuemadores] = useState('0');
+    const [freidoras, setFreidoras] = useState('0');
+    const [tienePlancha, setTienePlancha] = useState(false);
+    const [tieneHorno, setTieneHorno] = useState(false);
+    const [horasOperacion, setHorasOperacion] = useState('8');
+    const [diasOperacion, setDiasOperacion] = useState('6');
+
     const handleFinalizar = async () => {
         if (!nombre.trim()) {
             Alert.alert('Campo requerido', 'Por favor ingresa tu nombre.');
@@ -24,6 +46,21 @@ export default function OnboardingScreen() {
         const pers = parseInt(personas, 10);
         const alerta = parseInt(alertaDias, 10);
 
+        const cargaH = parseFloat(cargaHabitual) || 0;
+        const freqC = parseInt(frecuenciaCarga, 10) || 30;
+
+        // Parsing casa
+        const vCocina = parseInt(vecesCocina, 10) || 2;
+        const mCocina = parseInt(minutosCocina, 10) || 60;
+        const pBaño = parseInt(personasBaño, 10) || pers;
+        const tBaño = parseInt(tiempoBaño, 10) || 15;
+
+        // Parsing negocio
+        const nQuemadores = parseInt(quemadores, 10) || 0;
+        const nFreidoras = parseInt(freidoras, 10) || 0;
+        const hOperacion = parseFloat(horasOperacion) || 0;
+        const dOperacion = parseInt(diasOperacion, 10) || 6;
+
         if (isNaN(cap) || cap <= 0) {
             Alert.alert('Valor inválido', 'La capacidad del tanque debe ser mayor a 0.');
             return;
@@ -31,14 +68,30 @@ export default function OnboardingScreen() {
 
         await actualizarConfiguracion({
             nombre_usuario: nombre.trim(),
-            capacidad_kg: cap,
+            capacidad_litros: cap,
             num_personas: isNaN(pers) ? 3 : pers,
             alerta_dias: isNaN(alerta) ? 3 : alerta,
             onboarding_completo: true,
+            carga_habitual_litros: cargaH,
+            frecuencia_carga_dias: freqC,
+            tipo_uso: tipoUso || 'casa',
+            veces_cocina_dia: vCocina,
+            minutos_cocina_dia: mCocina,
+            num_personas_baño: pBaño,
+            tiempo_baño_min_promedio: tBaño,
+            tipo_negocio: tipoNegocio as any,
+            num_quemadores_comerciales: nQuemadores,
+            num_freidoras: nFreidoras,
+            tiene_plancha: tienePlancha,
+            tiene_horno: tieneHorno,
+            horas_operacion_dia: hOperacion,
+            dias_operacion_semana: dOperacion,
         });
-
         router.replace('/(tabs)');
     };
+
+    const nextStep = () => setStep(s => s + 1);
+    const prevStep = () => setStep(s => s - 1);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -54,10 +107,9 @@ export default function OnboardingScreen() {
                         <Text style={styles.tagline}>Tu asistente inteligente de gas</Text>
                     </View>
 
-                    {step === 0 ? (
+                    {step === 0 && (
                         <View style={styles.card}>
                             <Text style={styles.cardTitle}>¿Cómo funciona?</Text>
-
                             <View style={styles.featureRow}>
                                 <MaterialCommunityIcons name="gauge" size={28} color="#FF6B35" />
                                 <View style={styles.featureText}>
@@ -65,96 +117,185 @@ export default function OnboardingScreen() {
                                     <Text style={styles.featureDesc}>Ingresa el % de gas que tiene tu tanque.</Text>
                                 </View>
                             </View>
-
                             <View style={styles.featureRow}>
                                 <MaterialCommunityIcons name="brain" size={28} color="#4ADE80" />
                                 <View style={styles.featureText}>
                                     <Text style={styles.featureTitle}>IA predice tu consumo</Text>
-                                    <Text style={styles.featureDesc}>Aprende de tu historial y estima cuántos días te dura.</Text>
+                                    <Text style={styles.featureDesc}>Aprende de tu perfil y estima cuántos días te dura.</Text>
                                 </View>
                             </View>
-
-                            <View style={styles.featureRow}>
-                                <MaterialCommunityIcons name="bell-ring" size={28} color="#FACC15" />
-                                <View style={styles.featureText}>
-                                    <Text style={styles.featureTitle}>Recordatorios automáticos</Text>
-                                    <Text style={styles.featureDesc}>Te avisamos antes de que se acabe el gas.</Text>
-                                </View>
-                            </View>
-
-                            <TouchableOpacity style={styles.btnPrimary} onPress={() => setStep(1)}>
+                            <TouchableOpacity style={styles.btnPrimary} onPress={nextStep}>
                                 <Text style={styles.btnPrimaryText}>Comenzar →</Text>
                             </TouchableOpacity>
                         </View>
-                    ) : (
+                    )}
+
+                    {step === 1 && (
                         <View style={styles.card}>
-                            <Text style={styles.cardTitle}>Configura tu tanque</Text>
-
+                            <Text style={styles.cardTitle}>Paso 1: Perfil Básico</Text>
                             <Text style={styles.label}>Tu nombre</Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Ej. Juan"
-                                placeholderTextColor="#4A6080"
-                                value={nombre}
-                                onChangeText={setNombre}
-                            />
+                            <TextInput style={styles.input} placeholder="Ej. Juan" value={nombre} onChangeText={setNombre} placeholderTextColor="#4A6080" />
 
-                            <Text style={styles.label}>Capacidad del tanque (kg)</Text>
+                            <Text style={styles.label}>Capacidad del tanque (Litros)</Text>
                             <View style={styles.optionsRow}>
-                                {['20', '30', '45'].map((v) => (
-                                    <TouchableOpacity
-                                        key={v}
-                                        style={[styles.optionBtn, capacidad === v && styles.optionBtnActive]}
-                                        onPress={() => setCapacidad(v)}
-                                    >
-                                        <Text style={[styles.optionText, capacidad === v && styles.optionTextActive]}>
-                                            {v} kg
-                                        </Text>
+                                {['100', '120', '180', '300', '500', '1000', '2000', '5000'].map((v) => (
+                                    <TouchableOpacity key={v} style={[styles.optionBtn, capacidad === v && styles.optionBtnActive]} onPress={() => setCapacidad(v)}>
+                                        <Text style={[styles.optionText, capacidad === v && styles.optionTextActive]}>{v} L</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Otro valor en kg"
-                                placeholderTextColor="#4A6080"
-                                keyboardType="numeric"
-                                value={capacidad}
-                                onChangeText={setCapacidad}
-                            />
+                            <TextInput style={styles.input} placeholder="Otro valor en litros" keyboardType="numeric" value={capacidad} onChangeText={setCapacidad} placeholderTextColor="#4A6080" />
 
-                            <Text style={styles.label}>Personas en el hogar</Text>
-                            <View style={styles.optionsRow}>
-                                {['1', '2', '3', '4', '5+'].map((v) => (
-                                    <TouchableOpacity
-                                        key={v}
-                                        style={[styles.optionBtn, personas === v && styles.optionBtnActive]}
-                                        onPress={() => setPersonas(v === '5+' ? '5' : v)}
-                                    >
-                                        <Text style={[styles.optionText, personas === (v === '5+' ? '5' : v) && styles.optionTextActive]}>
-                                            {v}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
+                            <TouchableOpacity style={styles.btnPrimary} onPress={nextStep}>
+                                <Text style={styles.btnPrimaryText}>Siguiente</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                    {step === 2 && (
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Paso 2: Tipo de Uso</Text>
+                            <Text style={styles.featureDesc}>Esto ayuda a la IA a calcular cómo se consume tu gas.</Text>
+
+                            <View style={styles.usoContainer}>
+                                <TouchableOpacity
+                                    style={[styles.usoCard, tipoUso === 'casa' && styles.usoCardActive]}
+                                    onPress={() => setTipoUso('casa')}
+                                >
+                                    <MaterialCommunityIcons name="home" size={40} color={tipoUso === 'casa' ? "#FF6B35" : "#4A6080"} />
+                                    <Text style={[styles.usoTitle, tipoUso === 'casa' && styles.usoTextActive]}>Casa / Vivienda</Text>
+                                    <Text style={styles.usoDesc}>Uso doméstico, estufa, boiler, etc.</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.usoCard, tipoUso === 'negocio' && styles.usoCardActive]}
+                                    onPress={() => setTipoUso('negocio')}
+                                >
+                                    <MaterialCommunityIcons name="store" size={40} color={tipoUso === 'negocio' ? "#FF6B35" : "#4A6080"} />
+                                    <Text style={[styles.usoTitle, tipoUso === 'negocio' && styles.usoTextActive]}>Negocio / Comida</Text>
+                                    <Text style={styles.usoDesc}>Restaurantes, locales, freidoras.</Text>
+                                </TouchableOpacity>
                             </View>
 
-                            <Text style={styles.label}>Avisar con cuántos días de anticipación</Text>
+                            <View style={styles.navigationBtns}>
+                                <TouchableOpacity style={[styles.btnSecondary, { flex: 1 }]} onPress={prevStep}>
+                                    <Text style={styles.btnSecondaryText}>Atrás</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.btnPrimary, { flex: 2, marginTop: 0, opacity: tipoUso ? 1 : 0.5 }]}
+                                    onPress={() => tipoUso && nextStep()}
+                                    disabled={!tipoUso}
+                                >
+                                    <Text style={styles.btnPrimaryText}>Siguiente</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+
+                    {step === 3 && tipoUso === 'casa' && (
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Paso 3: Hábitos del Hogar</Text>
+
+                            <Text style={styles.label}>Personas en el hogar (X o más)</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={personas} onChangeText={setPersonas} placeholder="Ej. 3" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>¿Cuántas veces cocinan al día?</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={vecesCocina} onChangeText={setVecesCocina} placeholder="Ej. 2" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>¿Cuántos minutos en total cocinan al día?</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={minutosCocina} onChangeText={setMinutosCocina} placeholder="Ej. 60" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>¿Cuántos se bañan a diario con agua caliente?</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={personasBaño} onChangeText={setPersonasBaño} placeholder="Ej. 3" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>Tiempo promedio de baño (minutos)</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={tiempoBaño} onChangeText={setTiempoBaño} placeholder="Ej. 15" placeholderTextColor="#4A6080" />
+
+                            <View style={styles.navigationBtns}>
+                                <TouchableOpacity style={[styles.btnSecondary, { flex: 1 }]} onPress={prevStep}>
+                                    <Text style={styles.btnSecondaryText}>Atrás</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.btnPrimary, { flex: 2, marginTop: 0 }]} onPress={nextStep}>
+                                    <Text style={styles.btnPrimaryText}>Siguiente</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+
+                    {step === 3 && tipoUso === 'negocio' && (
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Paso 3: Equipos de Negocio</Text>
+                            <Text style={styles.featureDesc}>Omitir o poner '0' si no cuentas con alguno.</Text>
+
+                            <Text style={styles.label}>¿Cuántos quemadores comerciales/parrillas usas?</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={quemadores} onChangeText={setQuemadores} placeholder="Ej. 4" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>¿Cuántas freidoras a gas tienes?</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={freidoras} onChangeText={setFreidoras} placeholder="Ej. 1" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>¿Cuántas horas al día tienes la cocina encendida?</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={horasOperacion} onChangeText={setHorasOperacion} placeholder="Ej. 8" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>¿Cuántos días a la semana abres?</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={diasOperacion} onChangeText={setDiasOperacion} placeholder="Ej. 6" placeholderTextColor="#4A6080" />
+
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, tienePlancha && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setTienePlancha(!tienePlancha)}
+                                >
+                                    <Text style={[styles.optionText, tienePlancha && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {tienePlancha ? '✓ Plancha' : '+ Plancha a gas'}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, tieneHorno && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setTieneHorno(!tieneHorno)}
+                                >
+                                    <Text style={[styles.optionText, tieneHorno && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {tieneHorno ? '✓ Horno' : '+ Horno a gas'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.navigationBtns}>
+                                <TouchableOpacity style={[styles.btnSecondary, { flex: 1 }]} onPress={prevStep}>
+                                    <Text style={styles.btnSecondaryText}>Atrás</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.btnPrimary, { flex: 2, marginTop: 0 }]} onPress={nextStep}>
+                                    <Text style={styles.btnPrimaryText}>Siguiente</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+
+                    {step === 4 && (
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Paso 3: Historial de Carga</Text>
+
+                            <Text style={styles.label}>¿Cuánto cargas normalmente? (Litros)</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={cargaHabitual} onChangeText={setCargaHabitual} placeholder="Ej. 100" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>¿Cada cuánto tiempo recargas? (Días)</Text>
+                            <TextInput style={styles.input} keyboardType="numeric" value={frecuenciaCarga} onChangeText={setFrecuenciaCarga} placeholder="Ej. 30" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>Avisar con cuánto tiempo de anticipación</Text>
                             <View style={styles.optionsRow}>
                                 {['2', '3', '5', '7'].map((v) => (
-                                    <TouchableOpacity
-                                        key={v}
-                                        style={[styles.optionBtn, alertaDias === v && styles.optionBtnActive]}
-                                        onPress={() => setAlertaDias(v)}
-                                    >
-                                        <Text style={[styles.optionText, alertaDias === v && styles.optionTextActive]}>
-                                            {v} días
-                                        </Text>
+                                    <TouchableOpacity key={v} style={[styles.optionBtn, alertaDias === v && styles.optionBtnActive]} onPress={() => setAlertaDias(v)}>
+                                        <Text style={[styles.optionText, alertaDias === v && styles.optionTextActive]}>{v} días</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
 
-                            <TouchableOpacity style={styles.btnPrimary} onPress={handleFinalizar}>
-                                <Text style={styles.btnPrimaryText}>¡Listo! Empezar</Text>
-                            </TouchableOpacity>
+                            <View style={styles.navigationBtns}>
+                                <TouchableOpacity style={[styles.btnSecondary, { flex: 1 }]} onPress={prevStep}>
+                                    <Text style={styles.btnSecondaryText}>Atrás</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.btnPrimary, { flex: 2, marginTop: 0 }]} onPress={handleFinalizar}>
+                                    <Text style={styles.btnPrimaryText}>¡Finalizar!</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     )}
                 </ScrollView>
@@ -202,8 +343,16 @@ const styles = StyleSheet.create({
         backgroundColor: '#0D1B2A',
     },
     optionBtnActive: { backgroundColor: '#FF6B35', borderColor: '#FF6B35' },
-    optionText: { color: '#94A3B8', fontSize: 14, fontWeight: '600' },
+    optionText: { color: '#94A3B8', fontSize: 13, fontWeight: '600' },
     optionTextActive: { color: '#FFFFFF' },
+    navigationBtns: { flexDirection: 'row', gap: 12, marginTop: 24, alignItems: 'center' },
+    btnSecondary: {
+        backgroundColor: '#1E3A5F',
+        borderRadius: 12,
+        paddingVertical: 16,
+        alignItems: 'center',
+    },
+    btnSecondaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
     btnPrimary: {
         backgroundColor: '#FF6B35',
         borderRadius: 12,
@@ -212,4 +361,17 @@ const styles = StyleSheet.create({
         marginTop: 24,
     },
     btnPrimaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+    usoContainer: { marginTop: 16, gap: 16 },
+    usoCard: {
+        backgroundColor: '#0D1B2A',
+        borderWidth: 2,
+        borderColor: '#1E3A5F',
+        borderRadius: 16,
+        padding: 20,
+        alignItems: 'center',
+    },
+    usoCardActive: { borderColor: '#FF6B35', backgroundColor: '#FF6B3510' },
+    usoTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginTop: 12 },
+    usoTextActive: { color: '#FF6B35' },
+    usoDesc: { color: '#94A3B8', fontSize: 13, marginTop: 6, textAlign: 'center' },
 });

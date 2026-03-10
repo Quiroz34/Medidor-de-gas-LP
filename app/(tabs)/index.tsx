@@ -12,23 +12,33 @@ import {
     Lectura,
     Configuracion,
 } from '@/services/database';
-import { predecirConsumo, Prediccion } from '@/services/ai';
+import { predecirConsumo, Prediccion, estimarNivelActual, litrosAPorcentaje } from '@/services/ai';
 import { programarRecordatorio } from '@/services/notifications';
 
 export default function HomeScreen() {
     const [config, setConfig] = useState<Configuracion | null>(null);
     const [lecturas, setLecturas] = useState<Lectura[]>([]);
     const [prediccion, setPrediccion] = useState<Prediccion | null>(null);
+    const [nivelEstimado, setNivelEstimado] = useState<number>(0);
     const [refreshing, setRefreshing] = useState(false);
 
     const cargarDatos = useCallback(async () => {
         const cfg = await obtenerConfiguracion();
         const lects = await obtenerUltimasLecturas(20);
-        const pred = predecirConsumo(lects);
+        const pred = predecirConsumo(lects, cfg);
+
+        let nivel = 0;
+        if (lects.length > 0 && pred.tasa_consumo_diaria !== null) {
+            const litrosEstimados = estimarNivelActual(lects[0], pred.tasa_consumo_diaria);
+            nivel = litrosAPorcentaje(litrosEstimados, cfg.capacidad_litros);
+        } else if (lects.length > 0) {
+            nivel = lects[0].nivel_porcentaje;
+        }
 
         setConfig(cfg);
         setLecturas(lects);
         setPrediccion(pred);
+        setNivelEstimado(nivel);
 
         // Programar recordatorio si hay predicción con fecha
         if (pred.fecha_recarga && cfg.alerta_dias) {
@@ -61,6 +71,14 @@ export default function HomeScreen() {
         media: '#FACC15',
         baja: '#F87171',
         insuficiente: '#4A6080',
+        perfil: '#6366F1', // Púrpura para indicar estimación por perfil
+    };
+
+    const getNivelColor = (porc: number) => {
+        if (porc <= 10) return '#EF4444'; // Rojo
+        if (porc <= 30) return '#FF8C00'; // Naranja
+        if (porc <= 50) return '#FACC15'; // Amarillo
+        return '#4ADE80'; // Verde
     };
 
     return (
@@ -78,16 +96,39 @@ export default function HomeScreen() {
                     <MaterialCommunityIcons name="fire" size={28} color="#FF6B35" />
                 </View>
 
-                {/* Gauge */}
+                {/* Gauges */}
                 <View style={styles.gaugeCard}>
-                    <TankGauge
-                        porcentaje={nivelActual}
-                        capacidad_kg={config?.capacidad_kg ?? 30}
-                        size={220}
-                    />
-                    {fechaUltima && (
-                        <Text style={styles.fechaLabel}>Última lectura: {fechaUltima}</Text>
-                    )}
+                    <View style={styles.gaugesContainer}>
+                        {/* Reloj Principal (Predicción IA) */}
+                        <View style={styles.mainGaugeWrapper}>
+                            <TankGauge
+                                porcentaje={nivelEstimado}
+                                capacidad_litros={config?.capacidad_litros ?? 30}
+                                size={180}
+                            />
+                            <Text style={[styles.gaugeLabel, { color: getNivelColor(nivelEstimado) }]}>
+                                Estimado Actual
+                            </Text>
+                        </View>
+
+                        {/* Reloj Secundario (Última Lectura Real) */}
+                        {ultimaLectura && (
+                            <View style={styles.miniGaugeWrapper}>
+                                <TankGauge
+                                    porcentaje={nivelActual}
+                                    capacidad_litros={config?.capacidad_litros ?? 30}
+                                    size={80}
+                                />
+                                <Text style={[styles.miniGaugeLabel, { color: getNivelColor(nivelActual) }]}>
+                                    Último Registro
+                                </Text>
+                                {fechaUltima && (
+                                    <Text style={styles.fechaLabel}>{fechaUltima}</Text>
+                                )}
+                            </View>
+                        )}
+                    </View>
+
                     {!ultimaLectura && (
                         <Text style={styles.noDataHint}>Registra tu primer nivel para comenzar</Text>
                     )}
@@ -102,7 +143,7 @@ export default function HomeScreen() {
                             {prediccion.confianza !== 'insuficiente' && (
                                 <View style={[styles.badge, { backgroundColor: confianzaColor[prediccion.confianza] + '20' }]}>
                                     <Text style={[styles.badgeText, { color: confianzaColor[prediccion.confianza] }]}>
-                                        Confianza {prediccion.confianza}
+                                        {prediccion.confianza === 'perfil' ? 'Estimado del Perfil' : `Confianza ${prediccion.confianza}`}
                                     </Text>
                                 </View>
                             )}
@@ -119,7 +160,7 @@ export default function HomeScreen() {
                                 {prediccion.tasa_consumo_diaria !== null && (
                                     <View style={styles.stat}>
                                         <Text style={styles.statValue}>{prediccion.tasa_consumo_diaria}</Text>
-                                        <Text style={styles.statLabel}>kg/día</Text>
+                                        <Text style={styles.statLabel}>L/día</Text>
                                     </View>
                                 )}
                                 {prediccion.fecha_recarga && (
@@ -138,7 +179,7 @@ export default function HomeScreen() {
                 {/* Botón registrar */}
                 <TouchableOpacity style={styles.btnRegistrar} onPress={() => router.push('/registro')}>
                     <MaterialCommunityIcons name="plus-circle" size={22} color="#FFFFFF" />
-                    <Text style={styles.btnRegistrarText}>Registrar nueva lectura</Text>
+                    <Text style={styles.btnRegistrarText}>Registrar Nivel o Carga</Text>
                 </TouchableOpacity>
 
                 {/* Últimas lecturas (mini list) */}
@@ -156,7 +197,7 @@ export default function HomeScreen() {
                                     {new Date(l.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
                                 </Text>
                                 <Text style={styles.lecturaNivel}>{l.nivel_porcentaje}%</Text>
-                                <Text style={styles.lecturaKg}>{l.kg_restantes.toFixed(1)} kg</Text>
+                                <Text style={styles.lecturaKg}>{l.kg_restantes.toFixed(1)} L</Text>
                             </View>
                         ))}
                     </View>
@@ -168,23 +209,41 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0D1B2A' },
-    scroll: { padding: 20, paddingBottom: 40 },
+    scroll: { padding: 20, paddingBottom: 10 },
     headerRow: {
         flexDirection: 'row', justifyContent: 'space-between',
         alignItems: 'flex-start', marginBottom: 20,
+        marginTop: 40,
     },
     greeting: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
     subtitle: { fontSize: 13, color: '#4A6080', marginTop: 2 },
     gaugeCard: {
         backgroundColor: '#132338',
         borderRadius: 20,
-        padding: 24,
-        alignItems: 'center',
+        padding: 20,
         borderWidth: 1,
         borderColor: '#1E3A5F',
         marginBottom: 16,
     },
-    fechaLabel: { fontSize: 12, color: '#4A6080', marginTop: 8 },
+    gaugesContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 20,
+    },
+    mainGaugeWrapper: {
+        alignItems: 'center',
+    },
+    miniGaugeWrapper: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingLeft: 10,
+        borderLeftWidth: 1,
+        borderLeftColor: '#1E3A5F',
+    },
+    gaugeLabel: { fontSize: 13, fontWeight: 'bold', marginTop: 30 },
+    miniGaugeLabel: { fontSize: 11, fontWeight: '600', marginTop: 15 },
+    fechaLabel: { fontSize: 10, color: '#4A6080', marginTop: 2 },
     noDataHint: { fontSize: 13, color: '#4A6080', marginTop: 8, textAlign: 'center' },
     card: {
         backgroundColor: '#132338',

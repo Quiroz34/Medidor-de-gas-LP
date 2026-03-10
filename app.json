@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "GasLP",
+    "name": "Medidor de Gas LP",
     "slug": "gaslp-consumer",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -16,6 +16,7 @@
       "supportsTablet": false
     },
     "android": {
+      "package": "com.quiroz34.gaslp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#0D1B2A"
@@ -44,6 +45,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4259abb5-7cb9-4c76-ae7c-40e68cb79caa"
+      }
     }
   }
 }

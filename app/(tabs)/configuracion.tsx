@@ -15,11 +15,25 @@ import { cancelarRecordatorios } from '@/services/notifications';
 
 export default function ConfiguracionScreen() {
     const [config, setConfig] = useState<Configuracion>({
-        capacidad_kg: 30,
+        capacidad_litros: 30,
         num_personas: 3,
         nombre_usuario: '',
         alerta_dias: 3,
         onboarding_completo: true,
+        carga_habitual_litros: 0,
+        frecuencia_carga_dias: 30,
+        veces_cocina_dia: 2,
+        minutos_cocina_dia: 60,
+        num_personas_baño: 3,
+        tiempo_baño_min_promedio: 15,
+        tipo_uso: 'casa',
+        tipo_negocio: '',
+        num_quemadores_comerciales: 0,
+        num_freidoras: 0,
+        tiene_plancha: false,
+        tiene_horno: false,
+        horas_operacion_dia: 0,
+        dias_operacion_semana: 6,
     });
     const [guardado, setGuardado] = useState(false);
     const [notificaciones, setNotificaciones] = useState(true);
@@ -78,52 +92,175 @@ export default function ConfiguracionScreen() {
                         placeholder="Ej. Juan"
                         placeholderTextColor="#4A6080"
                     />
+
+                    <Text style={styles.label}>Personas en el hogar</Text>
+                    <TextInput
+                        style={styles.input}
+                        value={String(config.num_personas)}
+                        onChangeText={(v) => setConfig({ ...config, num_personas: parseInt(v, 10) || 0 })}
+                        keyboardType="numeric"
+                        placeholder="Ej. 3"
+                        placeholderTextColor="#4A6080"
+                    />
                 </View>
 
                 {/* Tanque */}
                 <View style={styles.card}>
                     <View style={styles.sectionHeader}>
                         <MaterialCommunityIcons name="propane-tank" size={16} color="#FF6B35" />
-                        <Text style={styles.sectionTitle}>Tu tanque</Text>
+                        <Text style={styles.sectionTitle}>Tu tanque e Historial</Text>
                     </View>
 
-                    <Text style={styles.label}>Capacidad total (kg)</Text>
+                    <Text style={styles.label}>Capacidad total (Litros)</Text>
                     <View style={styles.optionsRow}>
-                        {['20', '30', '45'].map((v) => (
+                        {['100', '120', '180', '300', '500', '1000', '2000', '5000'].map((v) => (
                             <TouchableOpacity
                                 key={v}
-                                style={[styles.optionBtn, config.capacidad_kg === parseFloat(v) && styles.optionBtnActive]}
-                                onPress={() => setConfig({ ...config, capacidad_kg: parseFloat(v) })}
+                                style={[styles.optionBtn, config.capacidad_litros === parseFloat(v) && styles.optionBtnActive]}
+                                onPress={() => setConfig({ ...config, capacidad_litros: parseFloat(v) })}
                             >
-                                <Text style={[styles.optionText, config.capacidad_kg === parseFloat(v) && styles.optionTextActive]}>
-                                    {v} kg
+                                <Text style={[styles.optionText, config.capacidad_litros === parseFloat(v) && styles.optionTextActive]}>
+                                    {v} L
                                 </Text>
                             </TouchableOpacity>
                         ))}
                     </View>
                     <TextInput
                         style={styles.input}
-                        value={String(config.capacidad_kg)}
-                        onChangeText={(v) => setConfig({ ...config, capacidad_kg: parseFloat(v) || 0 })}
+                        value={String(config.capacidad_litros)}
+                        onChangeText={(v) => setConfig({ ...config, capacidad_litros: parseFloat(v) || 0 })}
+                        keyboardType="numeric"
+                        placeholder="Ej. 100"
+                        placeholderTextColor="#4A6080"
+                    />
+
+                    <Text style={styles.label}>Carga habitual (Litros)</Text>
+                    <TextInput
+                        style={styles.input}
+                        value={String(config.carga_habitual_litros)}
+                        onChangeText={(v) => setConfig({ ...config, carga_habitual_litros: parseFloat(v) || 0 })}
+                        keyboardType="numeric"
+                        placeholder="Ej. 100"
+                        placeholderTextColor="#4A6080"
+                    />
+
+                    <Text style={styles.label}>Frecuencia de carga (Días)</Text>
+                    <TextInput
+                        style={styles.input}
+                        value={String(config.frecuencia_carga_dias)}
+                        onChangeText={(v) => setConfig({ ...config, frecuencia_carga_dias: parseInt(v, 10) || 0 })}
                         keyboardType="numeric"
                         placeholder="Ej. 30"
                         placeholderTextColor="#4A6080"
                     />
+                </View>
 
-                    <Text style={styles.label}>Personas en el hogar</Text>
-                    <View style={styles.optionsRow}>
-                        {[1, 2, 3, 4, 5].map((v) => (
-                            <TouchableOpacity
-                                key={v}
-                                style={[styles.optionBtn, config.num_personas === v && styles.optionBtnActive]}
-                                onPress={() => setConfig({ ...config, num_personas: v })}
-                            >
-                                <Text style={[styles.optionText, config.num_personas === v && styles.optionTextActive]}>
-                                    {v}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
+                {/* Hábitos */}
+                <View style={styles.card}>
+                    <View style={styles.sectionHeader}>
+                        <MaterialCommunityIcons name="silverware-fork-knife" size={16} color="#FF6B35" />
+                        <Text style={styles.sectionTitle}>Hábitos de Consumo</Text>
                     </View>
+
+                    <View style={styles.usoContainer}>
+                        <TouchableOpacity
+                            style={[styles.usoCard, config.tipo_uso === 'casa' && styles.usoCardActive]}
+                            onPress={() => setConfig({ ...config, tipo_uso: 'casa' })}
+                        >
+                            <MaterialCommunityIcons name="home" size={24} color={config.tipo_uso === 'casa' ? "#FF6B35" : "#4A6080"} />
+                            <Text style={[styles.usoTitle, config.tipo_uso === 'casa' && styles.usoTextActive]}>Casa</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.usoCard, config.tipo_uso === 'negocio' && styles.usoCardActive]}
+                            onPress={() => setConfig({ ...config, tipo_uso: 'negocio' })}
+                        >
+                            <MaterialCommunityIcons name="store" size={24} color={config.tipo_uso === 'negocio' ? "#FF6B35" : "#4A6080"} />
+                            <Text style={[styles.usoTitle, config.tipo_uso === 'negocio' && styles.usoTextActive]}>Negocio</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {config.tipo_uso === 'casa' ? (
+                        <>
+                            <Text style={styles.label}>Veces que cocinan al día</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.veces_cocina_dia)}
+                                onChangeText={(v) => setConfig({ ...config, veces_cocina_dia: parseInt(v, 10) || 0 })}
+                                keyboardType="numeric"
+                            />
+                            <Text style={styles.label}>Minutos totales de cocinado al día</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.minutos_cocina_dia)}
+                                onChangeText={(v) => setConfig({ ...config, minutos_cocina_dia: parseInt(v, 10) || 0 })}
+                                keyboardType="numeric"
+                            />
+                            <Text style={styles.label}>Personas que se bañan a diario</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.num_personas_baño)}
+                                onChangeText={(v) => setConfig({ ...config, num_personas_baño: parseInt(v, 10) || 0 })}
+                                keyboardType="numeric"
+                            />
+                            <Text style={styles.label}>Tiempo promedio de baño (minutos)</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.tiempo_baño_min_promedio)}
+                                onChangeText={(v) => setConfig({ ...config, tiempo_baño_min_promedio: parseInt(v, 10) || 0 })}
+                                keyboardType="numeric"
+                            />
+                        </>
+                    ) : (
+                        <>
+                            <Text style={styles.label}>Quemadores comerciales / Parrillas</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.num_quemadores_comerciales)}
+                                onChangeText={(v) => setConfig({ ...config, num_quemadores_comerciales: parseInt(v, 10) || 0 })}
+                                keyboardType="numeric"
+                            />
+                            <Text style={styles.label}>Freidoras a gas</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.num_freidoras)}
+                                onChangeText={(v) => setConfig({ ...config, num_freidoras: parseInt(v, 10) || 0 })}
+                                keyboardType="numeric"
+                            />
+                            <Text style={styles.label}>Horas de operación al día</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.horas_operacion_dia)}
+                                onChangeText={(v) => setConfig({ ...config, horas_operacion_dia: parseFloat(v) || 0 })}
+                                keyboardType="numeric"
+                            />
+                            <Text style={styles.label}>Días de operación a la semana</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={String(config.dias_operacion_semana)}
+                                onChangeText={(v) => setConfig({ ...config, dias_operacion_semana: parseInt(v, 10) || 0 })}
+                                keyboardType="numeric"
+                            />
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, config.tiene_plancha && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setConfig({ ...config, tiene_plancha: !config.tiene_plancha })}
+                                >
+                                    <Text style={[styles.optionText, config.tiene_plancha && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {config.tiene_plancha ? '✓ Plancha' : '+ Plancha a gas'}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, config.tiene_horno && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setConfig({ ...config, tiene_horno: !config.tiene_horno })}
+                                >
+                                    <Text style={[styles.optionText, config.tiene_horno && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {config.tiene_horno ? '✓ Horno' : '+ Horno a gas'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    )}
                 </View>
 
                 {/* Notificaciones */}
@@ -225,4 +362,12 @@ const styles = StyleSheet.create({
         padding: 12, marginTop: 4,
     },
     btnDangerText: { color: '#F87171', fontSize: 14, fontWeight: '600' },
+    usoContainer: { flexDirection: 'row', gap: 10, marginTop: 4, marginBottom: 12 },
+    usoCard: {
+        flex: 1, backgroundColor: '#0D1B2A', borderWidth: 2, borderColor: '#1E3A5F',
+        borderRadius: 12, padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8
+    },
+    usoCardActive: { borderColor: '#FF6B35', backgroundColor: '#FF6B3510' },
+    usoTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+    usoTextActive: { color: '#FF6B35' },
 });
