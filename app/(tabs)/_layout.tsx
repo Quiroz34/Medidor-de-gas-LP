@@ -40,6 +40,24 @@ export default function TabLayout() {
                 }}
             />
             <Tabs.Screen
+                name="gasero"
+                options={{
+                    title: 'Gasero',
+                    tabBarIcon: ({ color, size }) => (
+                        <MaterialCommunityIcons name="truck-delivery" color={color} size={size} />
+                    ),
+                }}
+            />
+            <Tabs.Screen
+                name="extras"
+                options={{
+                    title: 'Extras',
+                    tabBarIcon: ({ color, size }) => (
+                        <MaterialCommunityIcons name="plus-box" color={color} size={size} />
+                    ),
+                }}
+            />
+            <Tabs.Screen
                 name="configuracion"
                 options={{
                     title: 'Configuración',

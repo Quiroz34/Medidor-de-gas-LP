@@ -21,11 +21,13 @@ const mockConfig: Configuracion = {
     tiene_horno: false,
     horas_operacion_dia: 0,
     dias_operacion_semana: 6,
+    tiene_secadora: false,
+    tiene_calefaccion: false,
 };
 
 // Caso 1: Sin lecturas (debería usar la capacidad total o el perfil)
 const lecturas0: Lectura[] = [];
-const pred0 = predecirConsumo(lecturas0, mockConfig);
+const pred0 = predecirConsumo(lecturas0, mockConfig, []);
 console.log('--- Caso 0 Lecturas ---');
 console.log('Días restantes esperados: ~60');
 console.log('Días restantes obtenidos:', pred0.dias_restantes);
@@ -35,7 +37,7 @@ console.log('Tasa consumo (L/día):', pred0.tasa_consumo_diaria);
 const lecturas1: Lectura[] = [
     { fecha: new Date().toISOString(), nivel_porcentaje: 80, kg_restantes: 240, es_carga: false }
 ];
-const pred1 = predecirConsumo(lecturas1, mockConfig);
+const pred1 = predecirConsumo(lecturas1, mockConfig, []);
 console.log('\n--- Caso 1 Lectura (80%) ---');
 console.log('Días restantes esperados: 60');
 console.log('Días restantes obtenidos:', pred1.dias_restantes);
@@ -48,7 +50,7 @@ const lecturasFuga: Lectura[] = [
     { fecha: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), nivel_porcentaje: 60, kg_restantes: 180, es_carga: false },
     { fecha: new Date().toISOString(), nivel_porcentaje: 20, kg_restantes: 60, es_carga: false } // Drop masivo
 ];
-const predFuga = predecirConsumo(lecturasFuga, mockConfig);
+const predFuga = predecirConsumo(lecturasFuga, mockConfig, []);
 console.log('\n--- Caso 3 Fuga Detectada (caída de 120 litros en 1 día) ---');
 console.log('Mensaje esperado: ALERTA Fuga');
 console.log('Mensaje obtenido:', predFuga.mensaje);

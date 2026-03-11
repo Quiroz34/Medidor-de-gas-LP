@@ -1,12 +1,29 @@
-import type { Lectura, Configuracion } from './database';
+import type { Lectura, Configuracion, EventoExtra } from './database';
 
 export interface Prediccion {
-    dias_restantes: number | null;     // null = no hay suficientes datos
+    dias_restantes: number | null;
     fecha_recarga: Date | null;
-    tasa_consumo_diaria: number | null; // litros/día
+    tasa_consumo_diaria: number | null;
     confianza: 'alta' | 'media' | 'baja' | 'insuficiente' | 'perfil';
     mensaje: string;
+    alertas?: string[]; // Nuevas alertas inteligentes
 }
+
+// Factores de consumo por mes (1.0 = base, >1.0 = más consumo en frío, <1.0 = menos consumo)
+const FACTORES_ESTACIONALES: { [key: number]: number } = {
+    0: 1.25, // Enero (+)
+    1: 1.20, // Febrero (+)
+    2: 1.05, // Marzo
+    3: 0.95, // Abril
+    4: 0.90, // Mayo (-)
+    5: 0.85, // Junio (-)
+    6: 0.85, // Julio (-)
+    7: 0.90, // Agosto (-)
+    8: 0.95, // Septiembre
+    9: 1.10, // Octubre
+    10: 1.25, // Noviembre (+)
+    11: 1.35, // Diciembre (++)
+};
 
 // ── REGRESIÓN LINEAL (implementada desde cero) ──────────
 
@@ -19,7 +36,7 @@ interface PuntoDato {
 
 // ── FUNCIÓN PRINCIPAL DE PREDICCIÓN ─────────────────────
 
-export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Prediccion {
+export function predecirConsumo(lecturas: Lectura[], config: Configuracion, eventosExtra: EventoExtra[] = []): Prediccion {
     // Ordenar por fecha ascendente
     const ordenadas = [...lecturas].sort(
         (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime(),
@@ -57,7 +74,11 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
             const factorBaño = config.tiempo_baño_min_promedio / 15;
             const consumoBaño = config.num_personas_baño * (0.4 * factorBaño);
 
-            tasaEstimada = consumoCocina + consumoBaño;
+            // Nuevos factores de consumo (Estimado diario)
+            const consumoSecadora = config.tiene_secadora ? 0.4 : 0;
+            const consumoCalefaccion = config.tiene_calefaccion ? 1.0 : 0;
+
+            tasaEstimada = consumoCocina + consumoBaño + consumoSecadora + consumoCalefaccion;
 
             // Ajuste con el historial reportado si existe para casas
             if (config.carga_habitual_litros > 0 && config.frecuencia_carga_dias > 0) {
@@ -67,6 +88,10 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
 
             if (tasaEstimada <= 0) tasaEstimada = 0.8;
         }
+
+        const mesActual = new Date().getMonth();
+        const factorEstacional = FACTORES_ESTACIONALES[mesActual] || 1.0;
+        tasaEstimada *= factorEstacional;
 
         const litrosActuales = ordenadas.length === 1
             ? ordenadas[0].kg_restantes // kg_restantes en DB ahora actúan como litros
@@ -83,14 +108,23 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
         const litrosActualesEstimados = Math.max(0, litrosActuales - (diasTranscurridos * tasaEstimada));
         const diasRestantes = Math.round(litrosActualesEstimados / tasaEstimada);
 
+        const alertas: string[] = [];
+        if (fechaRecarga.getDay() === 0) {
+            alertas.push('📅 Tu gas se terminará en domingo. Te sugerimos recargar el viernes.');
+        }
+        if (factorEstacional > 1.1) {
+            alertas.push('❄️ Temporada de frío: tu consumo podría ser un poco más alto.');
+        }
+
         return {
-            dias_restantes: diasRestantes,
-            fecha_recarga: fechaRecarga,
-            tasa_consumo_diaria: Math.round(tasaEstimada * 100) / 100,
+            dias_restantes: ordenadas.length === 0 ? 0 : diasRestantes,
+            fecha_recarga: ordenadas.length === 0 ? null : fechaRecarga,
+            tasa_consumo_diaria: ordenadas.length === 0 ? 0 : Math.round(tasaEstimada * 100) / 100,
             confianza: 'perfil',
             mensaje: ordenadas.length === 0
-                ? 'Basado en tu perfil, estimamos tu consumo inicial. (Tip: Toma foto a tu tanque al recargar).'
+                ? '¡Bienvenido! Registra tu primer nivel de gas para que la IA comience a aprender de tus hábitos.'
                 : 'Estimación basada en tu perfil. Registra más niveles para mejorar la precisión y no olvides la foto de tu tanque al recargar.',
+            alertas: ordenadas.length === 0 ? undefined : (alertas.length > 0 ? alertas : undefined)
         };
     }
 
@@ -130,6 +164,10 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
             if (tasaEstimada <= 0) tasaEstimada = 0.8;
         }
 
+        const mesActual = new Date().getMonth();
+        const factorEstacional = FACTORES_ESTACIONALES[mesActual] || 1.0;
+        tasaEstimada *= factorEstacional;
+
         const ultimaLectura = ordenadas[ordenadas.length - 1];
         const litrosActuales = ultimaLectura.kg_restantes;
 
@@ -142,12 +180,21 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
         const litrosActualesEstimados = Math.max(0, litrosActuales - (diasTranscurridos * tasaEstimada));
         const diasRestantes = Math.round(litrosActualesEstimados / tasaEstimada);
 
+        const alertas: string[] = [];
+        if (fechaRecarga.getDay() === 0) {
+            alertas.push('📅 Tu gas se terminará en domingo. Te sugerimos recargar el viernes.');
+        }
+        if (factorEstacional > 1.1) {
+            alertas.push('❄️ Temporada de frío: tu consumo podría ser un poco más alto.');
+        }
+
         return {
             dias_restantes: diasRestantes,
             fecha_recarga: fechaRecarga,
             tasa_consumo_diaria: Math.round(tasaEstimada * 100) / 100,
             confianza: 'perfil',
-            mensaje: 'Nueva recarga detectada. Estimando según tu perfil hasta tener más lecturas. (¡Toma foto a tu tanque para verificar!)'
+            mensaje: 'Nueva recarga detectada. Estimando según tu perfil hasta tener más lecturas. (¡Toma foto a tu tanque para verificar!)',
+            alertas: alertas.length > 0 ? alertas : undefined
         };
     }
 
@@ -208,6 +255,17 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
     }
 
     const ultimaLectura = ordenadas[ordenadas.length - 1];
+
+    // Verificar si hay eventos extras recientes (últimos 3 días) que justifiquen el consumo
+    const hoyMillis = new Date().getTime();
+    const hayEventoReciente = eventosExtra.some(e => {
+        const diff = hoyMillis - new Date(e.fecha).getTime();
+        return diff > 0 && diff < (1000 * 60 * 60 * 24 * 3); // 3 días
+    });
+
+    if (hayFuga && hayEventoReciente) {
+        hayFuga = false; // Ignoramos la alerta de fuga si el usuario registró un evento extra
+    }
     const litrosActuales = ultimaLectura.kg_restantes;
 
     // Estimate current level based on time elapsed to ensure days decrease visually
@@ -240,10 +298,24 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
     else if (n >= 3 || r2 >= 0.6) confianza = 'media';
     else confianza = 'baja';
 
+    const alertas: string[] = [];
+
+    // 1. Alerta de Fin de Semana
+    if (fechaRecarga.getDay() === 0) {
+        alertas.push('📅 Tu gas se terminará en domingo. Te sugerimos recargar el viernes.');
+    }
+
+    // 2. Alerta de Estacionalidad
+    const mesActual = new Date().getMonth();
+    const factorEstacional = FACTORES_ESTACIONALES[mesActual] || 1.0;
+    if (factorEstacional > 1.1) {
+        alertas.push('❄️ Temporada de frío detectada: tu consumo podría ser un poco más alto.');
+    }
+
     let mensajeFinal = `Tienes gas para aproximadamente ${diasRestantes} días.`;
     if (hayFuga) {
         mensajeFinal = `⚠️ ALERTA: Consumo inusualmente alto detectado (${Math.round(tasaConsumo)} L/día). Asegúrate de que no haya fugas en tu instalación.`;
-        confianza = 'baja'; // Reducimos confianza porque es anómalo
+        confianza = 'baja';
     }
 
     return {
@@ -251,7 +323,44 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion): Pre
         fecha_recarga: fechaRecarga,
         tasa_consumo_diaria: Math.round(tasaConsumo * 100) / 100,
         confianza,
-        mensaje: mensajeFinal
+        mensaje: mensajeFinal,
+        alertas: alertas.length > 0 ? alertas : undefined
+    };
+}
+
+/**
+ * Valida si una carga de gas fue completa comparando los litros reportados
+ * contra el incremento medido en el tanque.
+ */
+export function validarCarga(lecturaActual: Lectura, lecturaAnterior: Lectura, capacidadTotal: number): {
+    esCorrecta: boolean;
+    diferenciaLitros: number;
+    mensaje: string;
+} {
+    if (!lecturaActual.es_carga || !lecturaActual.litros_cargados) {
+        return { esCorrecta: true, diferenciaLitros: 0, mensaje: '' };
+    }
+
+    // Litros reales que subió el tanque
+    const incrementoLitros = lecturaActual.kg_restantes - lecturaAnterior.kg_restantes;
+    const litrosEsperados = lecturaActual.litros_cargados;
+
+    // Margen de error aceptable (5% de la carga o 2 litros, lo que sea mayor)
+    const margenError = Math.max(litrosEsperados * 0.05, 2);
+    const diferencia = litrosEsperados - incrementoLitros;
+
+    if (diferencia > margenError) {
+        return {
+            esCorrecta: false,
+            diferenciaLitros: Math.round(diferencia),
+            mensaje: `⚠️ Posible carga incompleta detectada. El tanque subió ${incrementoLitros.toFixed(1)}L pero pagaste ${litrosEsperados}L. Diferencia: ~${Math.round(diferencia)}L.`
+        };
+    }
+
+    return {
+        esCorrecta: true,
+        diferenciaLitros: Math.round(diferencia),
+        mensaje: '✅ Carga verificada correctamente.'
     };
 }
 

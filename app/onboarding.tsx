@@ -6,9 +6,12 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { actualizarConfiguracion } from '@/services/database';
+import { actualizarConfiguracion } from '../services/database';
+
+import { useAlert } from '../services/alertContext';
 
 export default function OnboardingScreen() {
+    const { showAlert } = useAlert();
     const [step, setStep] = useState(0);
     const [nombre, setNombre] = useState('');
     const [capacidad, setCapacidad] = useState('30');
@@ -27,6 +30,8 @@ export default function OnboardingScreen() {
     const [minutosCocina, setMinutosCocina] = useState('60');
     const [personasBaño, setPersonasBaño] = useState('3');
     const [tiempoBaño, setTiempoBaño] = useState('15');
+    const [tieneSecadora, setTieneSecadora] = useState(false);
+    const [tieneCalefaccion, setTieneCalefaccion] = useState(false);
 
     // Campos Negocio
     const [tipoNegocio, setTipoNegocio] = useState('');
@@ -38,8 +43,21 @@ export default function OnboardingScreen() {
     const [diasOperacion, setDiasOperacion] = useState('6');
 
     const handleFinalizar = async () => {
+        if (!cargaHabitual.trim() || !frecuenciaCarga.trim()) {
+            showAlert({ 
+                title: 'Información faltante', 
+                message: 'Por favor ingresa cuánto cargas normalmente y cada cuánto tiempo lo haces.',
+                type: 'warning'
+            });
+            return;
+        }
+
         if (!nombre.trim()) {
-            Alert.alert('Campo requerido', 'Por favor ingresa tu nombre.');
+            showAlert({ 
+                title: 'Campo requerido', 
+                message: 'Por favor ingresa tu nombre.',
+                type: 'warning'
+            });
             return;
         }
         const cap = parseFloat(capacidad);
@@ -62,7 +80,11 @@ export default function OnboardingScreen() {
         const dOperacion = parseInt(diasOperacion, 10) || 6;
 
         if (isNaN(cap) || cap <= 0) {
-            Alert.alert('Valor inválido', 'La capacidad del tanque debe ser mayor a 0.');
+            showAlert({ 
+                title: 'Valor inválido', 
+                message: 'La capacidad del tanque debe ser mayor a 0.',
+                type: 'error'
+            });
             return;
         }
 
@@ -84,13 +106,66 @@ export default function OnboardingScreen() {
             num_freidoras: nFreidoras,
             tiene_plancha: tienePlancha,
             tiene_horno: tieneHorno,
+            tiene_secadora: tieneSecadora,
+            tiene_calefaccion: tieneCalefaccion,
             horas_operacion_dia: hOperacion,
             dias_operacion_semana: dOperacion,
         });
         router.replace('/(tabs)');
     };
 
-    const nextStep = () => setStep(s => s + 1);
+    const nextStep = () => {
+        if (step === 1) {
+            if (!nombre.trim()) {
+                showAlert({ 
+                    title: 'Información faltante', 
+                    message: 'Por favor ingresa tu nombre para continuar.',
+                    type: 'warning'
+                });
+                return;
+            }
+            const cap = parseFloat(capacidad);
+            if (isNaN(cap) || cap <= 0) {
+                showAlert({ 
+                    title: 'Valor inválido', 
+                    message: 'La capacidad del tanque debe ser un número mayor a 0 litros.',
+                    type: 'error'
+                });
+                return;
+            }
+        } else if (step === 2) {
+            if (!tipoUso) {
+                showAlert({ 
+                    title: 'Falta selección', 
+                    message: 'Por favor selecciona si el uso es para Casa o Negocio.',
+                    type: 'info'
+                });
+                return;
+            }
+        } else if (step === 3) {
+            if (tipoUso === 'casa') {
+                if (!personas.trim() || !vecesCocina.trim() || !minutosCocina.trim() || !personasBaño.trim() || !tiempoBaño.trim()) {
+                    showAlert({ 
+                        title: 'Campos incompletos', 
+                        message: 'Por favor responde todas las preguntas sobre los hábitos de tu hogar.',
+                        type: 'warning'
+                    });
+                    return;
+                }
+            } else if (tipoUso === 'negocio') {
+                if (!tipoNegocio.trim() || !quemadores.trim() || !freidoras.trim() || !horasOperacion.trim() || !diasOperacion.trim()) {
+                    showAlert({ 
+                        title: 'Campos incompletos', 
+                        message: 'Por favor responde todas las preguntas sobre tu negocio.',
+                        type: 'warning'
+                    });
+                    return;
+                }
+            }
+        }
+        setStep(s => s + 1);
+    };
+
     const prevStep = () => setStep(s => s - 1);
 
     return (
@@ -211,6 +286,25 @@ export default function OnboardingScreen() {
                             <Text style={styles.label}>Tiempo promedio de baño (minutos)</Text>
                             <TextInput style={styles.input} keyboardType="numeric" value={tiempoBaño} onChangeText={setTiempoBaño} placeholder="Ej. 15" placeholderTextColor="#4A6080" />
 
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, tieneSecadora && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setTieneSecadora(!tieneSecadora)}
+                                >
+                                    <Text style={[styles.optionText, tieneSecadora && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {tieneSecadora ? '✓ Secadora' : '+ Secadora'}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, tieneCalefaccion && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setTieneCalefaccion(!tieneCalefaccion)}
+                                >
+                                    <Text style={[styles.optionText, tieneCalefaccion && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {tieneCalefaccion ? '✓ Calefacción' : '+ Calefacción'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
                             <View style={styles.navigationBtns}>
                                 <TouchableOpacity style={[styles.btnSecondary, { flex: 1 }]} onPress={prevStep}>
                                     <Text style={styles.btnSecondaryText}>Atrás</Text>
@@ -225,7 +319,10 @@ export default function OnboardingScreen() {
                     {step === 3 && tipoUso === 'negocio' && (
                         <View style={styles.card}>
                             <Text style={styles.cardTitle}>Paso 3: Equipos de Negocio</Text>
-                            <Text style={styles.featureDesc}>Omitir o poner '0' si no cuentas con alguno.</Text>
+                            <Text style={styles.featureDesc}>Describe brevemente tu negocio y equipos.</Text>
+
+                            <Text style={styles.label}>Nombre o tipo de negocio</Text>
+                            <TextInput style={styles.input} value={tipoNegocio} onChangeText={setTipoNegocio} placeholder="Ej. Restaurante 'La Posada'" placeholderTextColor="#4A6080" />
 
                             <Text style={styles.label}>¿Cuántos quemadores comerciales/parrillas usas?</Text>
                             <TextInput style={styles.input} keyboardType="numeric" value={quemadores} onChangeText={setQuemadores} placeholder="Ej. 4" placeholderTextColor="#4A6080" />

@@ -24,7 +24,8 @@
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "SCHEDULE_EXACT_ALARM",
-        "USE_EXACT_ALARM"
+        "USE_EXACT_ALARM",
+        "READ_CONTACTS"
       ]
     },
     "web": {
@@ -41,7 +42,13 @@
           "sounds": []
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Permite que la aplicación acceda a tus contactos para seleccionar a tu gasero de confianza."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

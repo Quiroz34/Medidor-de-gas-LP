@@ -3,6 +3,9 @@ import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { initDatabase, obtenerConfiguracion } from '@/services/database';
 
+import { AlertProvider } from '@/services/alertContext';
+import CustomAlert from '@/components/CustomAlert';
+
 export default function RootLayout() {
     useEffect(() => {
         // Small delay so the navigator mounts before we navigate
@@ -19,7 +22,7 @@ export default function RootLayout() {
     }, []);
 
     return (
-        <>
+        <AlertProvider>
             <StatusBar style="light" />
             <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="onboarding" />
@@ -35,6 +38,7 @@ export default function RootLayout() {
                     }}
                 />
             </Stack>
-        </>
+            <CustomAlert />
+        </AlertProvider>
     );
 }

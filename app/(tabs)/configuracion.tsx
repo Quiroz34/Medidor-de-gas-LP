@@ -13,8 +13,12 @@ import {
 } from '@/services/database';
 import { cancelarRecordatorios } from '@/services/notifications';
 
+import { useAlert } from '@/services/alertContext';
+
 export default function ConfiguracionScreen() {
+    const { showAlert } = useAlert();
     const [config, setConfig] = useState<Configuracion>({
+        // ... (valores iniciales)
         capacidad_litros: 30,
         num_personas: 3,
         nombre_usuario: '',
@@ -34,6 +38,8 @@ export default function ConfiguracionScreen() {
         tiene_horno: false,
         horas_operacion_dia: 0,
         dias_operacion_semana: 6,
+        tiene_secadora: false,
+        tiene_calefaccion: false,
     });
     const [guardado, setGuardado] = useState(false);
     const [notificaciones, setNotificaciones] = useState(true);
@@ -46,7 +52,19 @@ export default function ConfiguracionScreen() {
 
     const handleGuardar = async () => {
         if (!config.nombre_usuario.trim()) {
-            Alert.alert('Campo requerido', 'El nombre no puede estar vacío.');
+            showAlert({ 
+                title: 'Campo requerido', 
+                message: 'El nombre no puede estar vacío.',
+                type: 'warning'
+            });
+            return;
+        }
+        if (config.capacidad_litros <= 0 || isNaN(config.capacidad_litros)) {
+            showAlert({ 
+                title: 'Capacidad inválida', 
+                message: 'La capacidad del tanque debe ser mayor a 0 litros.',
+                type: 'error'
+            });
             return;
         }
         await actualizarConfiguracion(config);
@@ -55,21 +73,22 @@ export default function ConfiguracionScreen() {
     };
 
     const handleResetDatos = () => {
-        Alert.alert(
-            'Borrar todos los datos',
-            '¿Seguro? Se eliminarán todas tus lecturas. La configuración se mantendrá.',
-            [
+        showAlert({
+            title: 'Borrar todos los datos',
+            message: '¿Seguro? Se eliminarán todas tus lecturas. La configuración se mantendrá.',
+            type: 'error',
+            buttons: [
                 { text: 'Cancelar', style: 'cancel' },
                 {
                     text: 'Borrar', style: 'destructive',
                     onPress: async () => {
                         await eliminarTodasLecturas();
                         await cancelarRecordatorios();
-                        Alert.alert('Hecho', 'Todos los datos de lecturas fueron eliminados.');
+                        showAlert({ title: 'Hecho', message: 'Todos los datos de lecturas fueron eliminados.', type: 'success' });
                     },
                 },
             ],
-        );
+        });
     };
 
     return (
@@ -210,6 +229,24 @@ export default function ConfiguracionScreen() {
                                 onChangeText={(v) => setConfig({ ...config, tiempo_baño_min_promedio: parseInt(v, 10) || 0 })}
                                 keyboardType="numeric"
                             />
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, config.tiene_secadora && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setConfig({ ...config, tiene_secadora: !config.tiene_secadora })}
+                                >
+                                    <Text style={[styles.optionText, config.tiene_secadora && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {config.tiene_secadora ? '✓ Secadora' : '+ Secadora'}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, config.tiene_calefaccion && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setConfig({ ...config, tiene_calefaccion: !config.tiene_calefaccion })}
+                                >
+                                    <Text style={[styles.optionText, config.tiene_calefaccion && styles.optionTextActive, { textAlign: 'center' }]}>
+                                        {config.tiene_calefaccion ? '✓ Calefacción' : '+ Calefacción'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
                         </>
                     ) : (
                         <>

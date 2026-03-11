@@ -75,10 +75,10 @@ export default function TankGauge({ porcentaje, capacidad_litros = 100, size = 2
                             <Stop offset="100%" stopColor="#FFFFFF" stopOpacity="0.2" />
                         </LinearGradient>
 
-                        {/* Path for Curved Branding Text */}
+                        {/* Path for Curved Branding Text - Adjusted for better centering and height */}
                         <Path
                             id="qzTextPath"
-                            d={`M ${cx - (size * 0.35)} ${cy + (size * 0.22)} A ${size * 0.40} ${size * 0.40} 0 0 0 ${cx + (size * 0.35)} ${cy + (size * 0.22)}`}
+                            d={`M ${cx - (size * 0.35)} ${cy + (size * 0.12)} A ${size * 0.40} ${size * 0.40} 0 0 0 ${cx + (size * 0.35)} ${cy + (size * 0.12)}`}
                         />
                     </Defs>
 
@@ -181,7 +181,7 @@ export default function TankGauge({ porcentaje, capacidad_litros = 100, size = 2
                                 fontWeight="900"
                                 letterSpacing={1}
                             >
-                                <TextPath href="#qzTextPath" startOffset="50%" textAnchor="middle">
+                                <TextPath href="#qzTextPath" startOffset="35%" textAnchor="middle">
                                     QZ Web Solutions
                                 </TextPath>
                             </SvgText>

@@ -11,11 +11,15 @@ import {
     obtenerConfiguracion,
     actualizarConfiguracion,
     Configuracion,
-} from '@/services/database';
-import { porcentajeALitros, calcularNivelCarga, dineroALitros } from '@/services/ai';
-import { obtenerUltimasLecturas, Lectura } from '@/services/database';
+    obtenerUltimasLecturas,
+    Lectura
+} from '../services/database';
+import { porcentajeALitros, calcularNivelCarga, dineroALitros, validarCarga } from '../services/ai';
+
+import { useAlert } from '../services/alertContext';
 
 export default function RegistroModal() {
+    const { showAlert } = useAlert();
     const [config, setConfig] = useState<Configuracion | null>(null);
     const [tipo, setTipo] = useState<'lectura' | 'carga'>('lectura');
     const [modoCarga, setModoCarga] = useState<'litros' | 'dinero'>('litros');
@@ -27,6 +31,7 @@ export default function RegistroModal() {
     const [litrosCargados, setLitrosCargados] = useState('');
     const [montoDinero, setMontoDinero] = useState('');
     const [precioLitro, setPrecioLitro] = useState('');
+    const [lastLectura, setLastLectura] = useState<Lectura | null>(null);
     const [nivelPrevio, setNivelPrevio] = useState(0);
 
     const [notas, setNotas] = useState('');
@@ -38,7 +43,10 @@ export default function RegistroModal() {
             if (cfg.precio_litro_actual) setPrecioLitro(String(cfg.precio_litro_actual));
         });
         obtenerUltimasLecturas(1).then(docs => {
-            if (docs.length > 0) setNivelPrevio(docs[0].nivel_porcentaje);
+            if (docs.length > 0) {
+                setLastLectura(docs[0]);
+                setNivelPrevio(docs[0].nivel_porcentaje);
+            }
         });
     }, []);
 
@@ -56,22 +64,67 @@ export default function RegistroModal() {
 
     const handleGuardar = async () => {
         if (!config) return;
+        
+        const esCarga = tipo === 'carga';
+        let lts = 0;
+        
+        if (esCarga) {
+            if (modoCarga === 'litros') {
+                lts = parseFloat(litrosCargados);
+                if (isNaN(lts) || lts <= 0) {
+                    showAlert({ title: 'Valor inválido', message: 'Ingresa una cantidad válida de litros.', type: 'warning' });
+                    return;
+                }
+            } else {
+                const monto = parseFloat(montoDinero);
+                const precio = parseFloat(precioLitro);
+                if (isNaN(monto) || monto <= 0 || isNaN(precio) || precio <= 0) {
+                    showAlert({ title: 'Valor inválido', message: 'Ingresa un monto y precio válido.', type: 'warning' });
+                    return;
+                }
+                lts = dineroALitros(monto, precio);
+            }
+        }
+
         setGuardando(true);
         try {
-            const esCarga = tipo === 'carga';
-            const lts = esCarga ? (modoCarga === 'litros' ? parseFloat(litrosCargados) : dineroALitros(parseFloat(montoDinero), parseFloat(precioLitro))) : 0;
 
-            await insertarLectura({
+            const parsedMonto = parseFloat(montoDinero);
+            const parsedPrecio = parseFloat(precioLitro);
+
+            const nuevaLectura: Lectura = {
                 fecha: new Date().toISOString(),
                 nivel_porcentaje: tipo === 'lectura' ? nivel : nivelCalculado,
-                // kg_restantes en DB ahora actúan como litros por compatibilidad de esquema
                 kg_restantes: litrosActuales,
                 notas: notas.trim() || undefined,
                 es_carga: esCarga,
                 litros_cargados: esCarga ? lts : undefined,
-                monto_dinero: (esCarga && modoCarga === 'dinero') ? parseFloat(montoDinero) : undefined,
-                precio_litro: esCarga ? parseFloat(precioLitro) : undefined,
-            });
+                monto_dinero: (esCarga && modoCarga === 'dinero' && !isNaN(parsedMonto)) ? parsedMonto : undefined,
+                precio_litro: (esCarga && !isNaN(parsedPrecio)) ? parsedPrecio : undefined,
+            };
+
+            await insertarLectura(nuevaLectura);
+
+            if (esCarga && lastLectura) {
+                const validacion = validarCarga(nuevaLectura, lastLectura, config.capacidad_litros);
+                if (!validacion.esCorrecta) {
+                    showAlert({
+                        title: '¡Atención: Carga Incompleta!',
+                        message: validacion.mensaje,
+                        type: 'warning',
+                        buttons: [{ text: 'Entendido', onPress: () => router.back() }]
+                    });
+                    return;
+                } else {
+                    showAlert({
+                        title: 'Carga Exitosa',
+                        message: validacion.mensaje,
+                        type: 'success',
+                        buttons: [{ text: 'OK', onPress: () => router.back() }]
+                    });
+                    return;
+                }
+            }
 
             if (esCarga && precioLitro) {
                 await actualizarConfiguracion({ ...config, precio_litro_actual: parseFloat(precioLitro) });
@@ -79,7 +132,11 @@ export default function RegistroModal() {
 
             router.back();
         } catch (e) {
-            Alert.alert('Error', 'No se pudo guardar el registro. Intenta de nuevo.');
+            showAlert({
+                title: 'Error',
+                message: 'No se pudo guardar el registro. Intenta de nuevo.',
+                type: 'error'
+            });
         } finally {
             setGuardando(false);
         }

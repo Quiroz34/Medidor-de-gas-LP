@@ -5,15 +5,16 @@ import {
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import TankGauge from '@/components/TankGauge';
+import TankGauge from '../../components/TankGauge';
 import {
     obtenerUltimasLecturas,
     obtenerConfiguracion,
+    obtenerEventosExtra,
     Lectura,
     Configuracion,
-} from '@/services/database';
-import { predecirConsumo, Prediccion, estimarNivelActual, litrosAPorcentaje } from '@/services/ai';
-import { programarRecordatorio } from '@/services/notifications';
+} from '../../services/database';
+import { predecirConsumo, Prediccion, estimarNivelActual, litrosAPorcentaje } from '../../services/ai';
+import { programarRecordatorio } from '../../services/notifications';
 
 export default function HomeScreen() {
     const [config, setConfig] = useState<Configuracion | null>(null);
@@ -25,14 +26,17 @@ export default function HomeScreen() {
     const cargarDatos = useCallback(async () => {
         const cfg = await obtenerConfiguracion();
         const lects = await obtenerUltimasLecturas(20);
-        const pred = predecirConsumo(lects, cfg);
+        const evts = await obtenerEventosExtra();
+        const pred = predecirConsumo(lects, cfg, evts);
 
         let nivel = 0;
-        if (lects.length > 0 && pred.tasa_consumo_diaria !== null) {
-            const litrosEstimados = estimarNivelActual(lects[0], pred.tasa_consumo_diaria);
-            nivel = litrosAPorcentaje(litrosEstimados, cfg.capacidad_litros);
-        } else if (lects.length > 0) {
-            nivel = lects[0].nivel_porcentaje;
+        if (lects.length > 0) {
+            if (pred.tasa_consumo_diaria !== null) {
+                const litrosEstimados = estimarNivelActual(lects[0], pred.tasa_consumo_diaria);
+                nivel = litrosAPorcentaje(litrosEstimados, cfg.capacidad_litros);
+            } else {
+                nivel = lects[0].nivel_porcentaje;
+            }
         }
 
         setConfig(cfg);
@@ -151,6 +155,17 @@ export default function HomeScreen() {
 
                         <Text style={styles.mensajeIA}>{prediccion.mensaje}</Text>
 
+                        {prediccion.alertas && prediccion.alertas.length > 0 && (
+                            <View style={styles.alertasContainer}>
+                                {prediccion.alertas.map((alerta, idx) => (
+                                    <View key={idx} style={styles.alertaItem}>
+                                        <MaterialCommunityIcons name="information-outline" size={14} color="#6366F1" />
+                                        <Text style={styles.alertaText}>{alerta}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        )}
+
                         {prediccion.dias_restantes !== null && (
                             <View style={styles.statsRow}>
                                 <View style={styles.stat}>
@@ -261,6 +276,15 @@ const styles = StyleSheet.create({
     },
     badgeText: { fontSize: 11, fontWeight: '700' },
     mensajeIA: { fontSize: 14, color: '#E2E8F0', lineHeight: 20, marginBottom: 14 },
+    alertasContainer: {
+        backgroundColor: '#1E3A5F40',
+        borderRadius: 10,
+        padding: 10,
+        marginBottom: 14,
+        gap: 6,
+    },
+    alertaItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+    alertaText: { fontSize: 12, color: '#94A3B8', flex: 1, lineHeight: 16 },
     statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
     stat: { alignItems: 'center' },
     statValue: { fontSize: 22, fontWeight: '800', color: '#FF6B35' },

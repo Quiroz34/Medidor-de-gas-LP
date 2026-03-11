@@ -7,7 +7,10 @@ import { useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { obtenerLecturas, eliminarLectura, Lectura } from '@/services/database';
 
+import { useAlert } from '@/services/alertContext';
+
 export default function HistorialScreen() {
+    const { showAlert } = useAlert();
     const [lecturas, setLecturas] = useState<Lectura[]>([]);
 
     const cargar = useCallback(async () => {
@@ -18,20 +21,22 @@ export default function HistorialScreen() {
     useFocusEffect(useCallback(() => { cargar(); }, [cargar]));
 
     const handleEliminar = (id: number) => {
-        Alert.alert(
-            'Eliminar lectura',
-            '¿Seguro que deseas eliminar esta lectura?',
-            [
+        showAlert({
+            title: 'Eliminar lectura',
+            message: '¿Seguro que deseas eliminar esta lectura?',
+            type: 'warning',
+            buttons: [
                 { text: 'Cancelar', style: 'cancel' },
                 {
                     text: 'Eliminar', style: 'destructive',
                     onPress: async () => {
                         await eliminarLectura(id);
                         cargar();
+                        showAlert({ title: 'Eliminado', message: 'La lectura ha sido eliminada.', type: 'info' });
                     },
                 },
             ],
-        );
+        });
     };
 
     // Calcular consumo entre lecturas consecutivas para la gráfica de barras manual
