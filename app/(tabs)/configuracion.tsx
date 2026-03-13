@@ -11,13 +11,14 @@ import {
     eliminarTodasLecturas,
     Configuracion,
     obtenerLecturas,
-} from '@/services/database';
-import { cancelarRecordatorios, solicitarPermisos } from '@/services/notifications';
+} from '../../services/database';
+import { detectUserLocation } from '../../services/locationService';
+import { cancelarRecordatorios, solicitarPermisos } from '../../services/notifications';
 import * as Notifications from 'expo-notifications';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-import { useAlert } from '@/services/alertContext';
+import { useAlert } from '../../services/alertContext';
 
 export default function ConfiguracionScreen() {
     const { showAlert } = useAlert();
@@ -47,6 +48,12 @@ export default function ConfiguracionScreen() {
         num_personas_boiler: 3,
         zona_climatica: 'centro',
         precio_litro_actual: undefined,
+        pais: 'México',
+        estado: '',
+        municipio: '',
+        actualizar_precio_auto: true,
+        gasero_nombre: '',
+        gasero_telefono: '',
     });
     const [guardado, setGuardado] = useState(false);
     const [notificaciones, setNotificaciones] = useState(true);
@@ -106,6 +113,29 @@ export default function ConfiguracionScreen() {
         });
     };
 
+    const handleAutoDetectarUbicacion = async () => {
+        const locData = await detectUserLocation();
+        if (locData) {
+            setConfig({
+                ...config,
+                pais: locData.pais,
+                estado: locData.estado,
+                municipio: locData.municipio
+            });
+            showAlert({
+                title: 'Ubicación detectada',
+                message: `Se ha detectado: ${locData.municipio}, ${locData.estado}.`,
+                type: 'success'
+            });
+        } else {
+            showAlert({
+                title: 'Error',
+                message: 'No se pudo obtener la ubicación. Verifica tus permisos de GPS.',
+                type: 'error'
+            });
+        }
+    };
+
     const handleExportarCSV = async () => {
         try {
             const lecturas = await obtenerLecturas();
@@ -118,25 +148,34 @@ export default function ConfiguracionScreen() {
                 return;
             }
 
-            // Crear el contenido CSV
-            let csv = 'ID,Fecha,Nivel(%),Litros Restantes,Es Carga,Litros Cargados,Monto($),Precio/L,Notas\n';
-            lecturas.forEach(l => {
+            // Crear el contenido CSV de forma robusta
+            const header = 'ID,Fecha,Nivel(%),Litros Restantes,Es Carga,Litros Cargados,Monto($),Precio/L,Notas\n';
+            const rows = lecturas.map(l => {
                 const fecha = new Date(l.fecha).toLocaleString();
-                csv += `${l.id},"${fecha}",${l.nivel_porcentaje},${l.kg_restantes},${l.es_carga ? 'SÍ' : 'NO'},${l.litros_cargados || ''},${l.monto_dinero || ''},${l.precio_litro || ''},"${l.notas || ''}"\n`;
-            });
+                const esCargaText = l.es_carga ? 'SÍ' : 'NO';
+                const notasEscaped = (l.notas || '').replace(/"/g, '""');
+                return `${l.id},"${fecha}",${l.nivel_porcentaje},${l.kg_restantes},${esCargaText},${l.litros_cargados || ''},${l.monto_dinero || ''},${l.precio_litro || ''},"${notasEscaped}"`;
+            }).join('\n');
 
-            // Guardar archivo temporal
-            const fileName = `historial_gaslp_${new Date().getTime()}.csv`;
-            // @ts-ignore - Some versions of expo-file-system types might differ
-            const fileUri = `${FileSystem.cacheDirectory || FileSystem.documentDirectory}${fileName}`;
-            // @ts-ignore
-            await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType?.UTF8 || 'utf8' });
+            const csvContent = header + rows;
 
-            // Compartir
-            if (await Sharing.isAvailableAsync()) {
+            // Guardar archivo temporal en el directorio de cache de forma segura
+            const cacheDir = FileSystem.cacheDirectory;
+            if (!cacheDir) {
+                throw new Error('No se pudo acceder al directorio de cache.');
+            }
+
+            const fileName = `historial_gaslp_${Date.now()}.csv`;
+            const fileUri = cacheDir + fileName;
+            
+            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' as any });
+
+            // Compartir el archivo
+            const isSharingAvailable = await Sharing.isAvailableAsync();
+            if (isSharingAvailable) {
                 await Sharing.shareAsync(fileUri, {
                     mimeType: 'text/csv',
-                    dialogTitle: 'Exportar Historial de Gas LP',
+                    dialogTitle: 'Exportar Historial de Gas',
                     UTI: 'public.comma-separated-values-text'
                 });
             } else {
@@ -146,11 +185,11 @@ export default function ConfiguracionScreen() {
                     type: 'error'
                 });
             }
-        } catch (e) {
-            console.error(e);
+        } catch (error) {
+            console.error('Error al exportar CSV:', error);
             showAlert({
                 title: 'Error',
-                message: 'No se pudo generar el archivo CSV.',
+                message: 'Ocurrió un error inesperado al generar el archivo CSV.',
                 type: 'error'
             });
         }
@@ -205,6 +244,53 @@ export default function ConfiguracionScreen() {
                         placeholder="Ej. 3"
                         placeholderTextColor="#4A6080"
                     />
+
+                    {/* Regional / Precios */}
+                    <View style={{ marginTop: 16 }}>
+                        <Text style={styles.label}>País</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={config.pais}
+                            onChangeText={(v) => setConfig({ ...config, pais: v })}
+                            placeholder="México"
+                            placeholderTextColor="#4A6080"
+                        />
+
+                        <Text style={styles.label}>Estado / Provincia</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={config.estado}
+                            onChangeText={(v) => setConfig({ ...config, estado: v })}
+                            placeholder="Ej. CDMX"
+                            placeholderTextColor="#4A6080"
+                        />
+
+                        <Text style={styles.label}>Municipio / Ciudad</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={config.municipio}
+                            onChangeText={(v) => setConfig({ ...config, municipio: v })}
+                            placeholder="Ej. León"
+                            placeholderTextColor="#4A6080"
+                        />
+
+                        <TouchableOpacity
+                            style={styles.btnDetectar}
+                            onPress={handleAutoDetectarUbicacion}
+                        >
+                            <MaterialCommunityIcons name="map-marker-radius" size={18} color="#3B82F6" />
+                            <Text style={styles.btnDetectarText}>Auto-detectar ubicación</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.optionBtn, config.actualizar_precio_auto && styles.optionBtnActive, { marginTop: 8 }]}
+                            onPress={() => setConfig({ ...config, actualizar_precio_auto: !config.actualizar_precio_auto })}
+                        >
+                            <Text style={[styles.optionText, config.actualizar_precio_auto && styles.optionTextActive, { textAlign: 'center' }]}>
+                                {config.actualizar_precio_auto ? '✓ Precio automático activo' : '+ Activar precio automático'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {/* Tanque */}
@@ -546,6 +632,25 @@ const styles = StyleSheet.create({
     btnDangerText: { color: '#F87171', fontSize: 14, fontWeight: '600' },
     usoContainer: { flexDirection: 'row', gap: 10, marginTop: 4, marginBottom: 12 },
     description: { fontSize: 13, color: '#94A3B8', marginBottom: 12, lineHeight: 18 },
+    rowKg: { fontSize: 13, color: '#4A6080', width: 55, textAlign: 'right' },
+    btnDetectar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#3B82F615',
+        borderWidth: 1,
+        borderColor: '#3B82F640',
+        borderRadius: 10,
+        paddingVertical: 10,
+        marginTop: 4,
+        marginBottom: 8,
+    },
+    btnDetectarText: {
+        color: '#3B82F6',
+        fontSize: 13,
+        fontWeight: '700',
+    },
     btnExport: {
         flexDirection: 'row',
         alignItems: 'center',

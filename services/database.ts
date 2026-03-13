@@ -57,9 +57,14 @@ export interface Configuracion {
     horas_operacion_dia: number;
     dias_operacion_semana: number;
     // Precio
-    precio_litro_actual?: number;
     gasero_nombre?: string;
     gasero_telefono?: string;
+    // Regional y Automático (NUEVO)
+    pais: string;
+    estado: string;
+    municipio: string;
+    actualizar_precio_auto: boolean;
+    precio_litro_actual?: number;
 }
 
 const DEFAULT_CONFIG: Configuracion = {
@@ -87,9 +92,12 @@ const DEFAULT_CONFIG: Configuracion = {
     tiene_horno: false,
     horas_operacion_dia: 0,
     dias_operacion_semana: 6,
-    precio_litro_actual: undefined,
-    gasero_nombre: '',
     gasero_telefono: '',
+    precio_litro_actual: undefined,
+    pais: 'México',
+    estado: '',
+    municipio: '',
+    actualizar_precio_auto: true,
 };
 
 let db: SQLite.SQLiteDatabase | null = null;
@@ -141,9 +149,12 @@ export async function initDatabase(): Promise<void> {
       tiene_boiler INTEGER DEFAULT 1,
       num_personas_boiler INTEGER DEFAULT 3,
       zona_climatica TEXT DEFAULT 'centro',
-      gasero_nombre TEXT DEFAULT '',
       gasero_telefono TEXT DEFAULT '',
-      precio_litro_actual REAL
+      precio_litro_actual REAL,
+      pais TEXT DEFAULT 'México',
+      estado TEXT DEFAULT '',
+      municipio TEXT DEFAULT '',
+      actualizar_precio_auto INTEGER DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS eventos_extra (
@@ -187,6 +198,10 @@ export async function initDatabase(): Promise<void> {
         'tiene_boiler INTEGER DEFAULT 1',
         'num_personas_boiler INTEGER DEFAULT 3',
         'zona_climatica TEXT DEFAULT "centro"',
+        'pais TEXT DEFAULT "México"',
+        'estado TEXT DEFAULT ""',
+        'municipio TEXT DEFAULT ""',
+        'actualizar_precio_auto INTEGER DEFAULT 1',
     ];
 
     for (const col of columns) {
@@ -293,6 +308,10 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         horas_operacion_dia: number;
         dias_operacion_semana: number;
         precio_litro_actual: number | null;
+        pais: string;
+        estado: string;
+        municipio: string;
+        actualizar_precio_auto: number;
     }>(`SELECT * FROM configuracion WHERE id = 1`);
 
     if (!row) return DEFAULT_CONFIG;
@@ -302,7 +321,7 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         num_personas: row.num_personas,
         nombre_usuario: row.nombre_usuario,
         alerta_dias: row.alerta_dias,
-        onboarding_completo: !!row.onboarding_completo,
+        onboarding_completo: row.onboarding_completo === 1,
         carga_habitual_litros: row.carga_habitual_litros || 0,
         frecuencia_carga_dias: row.frecuencia_carga_dias || 30,
         tipo_uso: (row.tipo_uso as 'casa' | 'negocio') || 'casa',
@@ -310,21 +329,25 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         minutos_cocina_dia: row.minutos_cocina_dia || 60,
         num_personas_baño: row.num_personas_baño || 0,
         tiempo_baño_min_promedio: row.tiempo_baño_min_promedio || 0,
-        tiene_secadora: !!row.tiene_secadora,
-        tiene_calefaccion: !!row.tiene_calefaccion,
-        tiene_boiler: row.tiene_boiler === null || row.tiene_boiler === undefined ? true : !!row.tiene_boiler,
+        tiene_secadora: row.tiene_secadora === 1,
+        tiene_calefaccion: row.tiene_calefaccion === 1,
+        tiene_boiler: row.tiene_boiler === 1,
         num_personas_boiler: row.num_personas_boiler || 3,
         zona_climatica: (row.zona_climatica as 'norte' | 'centro' | 'sur') || 'centro',
         tipo_negocio: (row.tipo_negocio as any) || '',
         num_quemadores_comerciales: row.num_quemadores_comerciales || 0,
         num_freidoras: row.num_freidoras || 0,
-        tiene_plancha: !!row.tiene_plancha,
-        tiene_horno: !!row.tiene_horno,
+        tiene_plancha: row.tiene_plancha === 1,
+        tiene_horno: row.tiene_horno === 1,
         horas_operacion_dia: row.horas_operacion_dia || 0,
         dias_operacion_semana: row.dias_operacion_semana || 6,
         gasero_nombre: row.gasero_nombre || '',
         gasero_telefono: row.gasero_telefono || '',
         precio_litro_actual: row.precio_litro_actual ?? undefined,
+        pais: row.pais || 'México',
+        estado: row.estado || '',
+        municipio: row.municipio || '',
+        actualizar_precio_auto: row.actualizar_precio_auto === 1,
     };
 }
 
@@ -361,7 +384,11 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
       tiene_horno = ?,
       horas_operacion_dia = ?,
       dias_operacion_semana = ?,
-      precio_litro_actual = ?
+      precio_litro_actual = ?,
+      pais = ?,
+      estado = ?,
+      municipio = ?,
+      actualizar_precio_auto = ?
     WHERE id = 1`,
         merged.capacidad_litros,
         merged.num_personas,
@@ -390,6 +417,10 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
         merged.horas_operacion_dia,
         merged.dias_operacion_semana,
         merged.precio_litro_actual ?? null,
+        merged.pais,
+        merged.estado,
+        merged.municipio,
+        merged.actualizar_precio_auto ? 1 : 0
     );
 }
 

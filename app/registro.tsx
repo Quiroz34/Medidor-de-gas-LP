@@ -15,6 +15,7 @@ import {
     Lectura
 } from '../services/database';
 import { porcentajeALitros, calcularNivelCarga, dineroALitros, validarCarga } from '../services/ai';
+import { fetchCurrentGasPrice } from '../services/priceService';
 
 import { useAlert } from '../services/alertContext';
 
@@ -36,11 +37,22 @@ export default function RegistroModal() {
 
     const [notas, setNotas] = useState('');
     const [guardando, setGuardando] = useState(false);
+    const [precioEsAuto, setPrecioEsAuto] = useState(false);
 
     useEffect(() => {
-        obtenerConfiguracion().then(cfg => {
+        obtenerConfiguracion().then(async cfg => {
             setConfig(cfg);
             if (cfg.precio_litro_actual) setPrecioLitro(String(cfg.precio_litro_actual));
+            
+            // Si está activo el autómata de precios, intentamos actualizar al abrir el modal de carga
+            if (cfg.actualizar_precio_auto) {
+                const livePrice = await fetchCurrentGasPrice(cfg);
+                if (livePrice) {
+                    setPrecioLitro(String(livePrice));
+                    setPrecioEsAuto(true);
+                    await actualizarConfiguracion({ precio_litro_actual: livePrice });
+                }
+            }
         });
         obtenerUltimasLecturas(1).then(docs => {
             if (docs.length > 0) {
@@ -285,29 +297,55 @@ export default function RegistroModal() {
                                         value={montoDinero}
                                         onChangeText={setMontoDinero}
                                     />
-                                    <Text style={styles.label}>Precio por litro ($)</Text>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Text style={styles.label}>Precio por litro ($)</Text>
+                                        {precioEsAuto && (
+                                            <Text style={{ fontSize: 11, color: '#4ADE80', fontWeight: 'bold' }}>✓ Actualizado auto.</Text>
+                                        )}
+                                    </View>
                                     <TextInput
                                         style={styles.input}
                                         placeholder="Ej. 11.50"
                                         placeholderTextColor="#4A6080"
                                         keyboardType="numeric"
                                         value={precioLitro}
-                                        onChangeText={setPrecioLitro}
+                                        onChangeText={(v) => {
+                                            setPrecioLitro(v);
+                                            setPrecioEsAuto(false);
+                                        }}
                                     />
+                                    {precioEsAuto && (
+                                        <Text style={{ fontSize: 10, color: '#4ADE80', marginTop: 2, marginBottom: 12, fontStyle: 'italic' }}>
+                                            * Precio oficial vigente regulado por el gobierno de México al día de hoy.
+                                        </Text>
+                                    )}
                                 </>
                             )}
 
                             {tipo === 'carga' && modoCarga === 'litros' && (
                                 <>
-                                    <Text style={styles.label}>Precio por litro (opcional)</Text>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Text style={styles.label}>Precio por litro (opcional)</Text>
+                                        {precioEsAuto && (
+                                            <Text style={{ fontSize: 11, color: '#4ADE80', fontWeight: 'bold' }}>✓ Actualizado auto.</Text>
+                                        )}
+                                    </View>
                                     <TextInput
                                         style={styles.input}
                                         placeholder="Ej. 11.50"
                                         placeholderTextColor="#4A6080"
                                         keyboardType="numeric"
                                         value={precioLitro}
-                                        onChangeText={setPrecioLitro}
+                                        onChangeText={(v) => {
+                                            setPrecioLitro(v);
+                                            setPrecioEsAuto(false);
+                                        }}
                                     />
+                                    {precioEsAuto && (
+                                        <Text style={{ fontSize: 10, color: '#4ADE80', marginTop: 2, marginBottom: 10, fontStyle: 'italic' }}>
+                                            * Precio oficial vigente regulado por el gobierno de México al día de hoy.
+                                        </Text>
+                                    )}
                                 </>
                             )}
 

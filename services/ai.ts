@@ -139,7 +139,7 @@ function calcularTasaHistorica(todasLasLecturas: Lectura[]): number | null {
         sumaPesos += peso;
     }
 
-    return sumaPonderada / sumaPesos;
+    return sumaPesos > 0 ? sumaPonderada / sumaPesos : null;
 }
 
 // ── TASA DEL PERFIL DEL USUARIO ──────────────────────────────────────────────
@@ -178,7 +178,8 @@ export function calcularTasaPerfil(config: Configuracion): number {
         tasa = config.carga_habitual_litros / config.frecuencia_carga_dias;
     }
 
-    return Math.max(0.5, tasa);
+    // Asegurar que la tasa sea al menos 0.5 L/día para evitar divisiones por cero infinitas
+    return Math.max(0.5, tasa || 0.5);
 }
 
 // ── FACTOR ESTACIONAL ─────────────────────────────────────────────────────────

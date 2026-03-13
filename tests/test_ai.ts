@@ -23,6 +23,13 @@ const mockConfig: Configuracion = {
     dias_operacion_semana: 6,
     tiene_secadora: false,
     tiene_calefaccion: false,
+    tiene_boiler: true,
+    num_personas_boiler: 4,
+    zona_climatica: 'centro',
+    pais: 'México',
+    estado: 'Jalisco',
+    municipio: 'Guadalajara',
+    actualizar_precio_auto: true,
 };
 
 // Caso 1: Sin lecturas (debería usar la capacidad total o el perfil)

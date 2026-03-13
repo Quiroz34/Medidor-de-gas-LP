@@ -181,7 +181,7 @@ export default function TankGauge({ porcentaje, capacidad_litros = 100, size = 2
                                 fontWeight="900"
                                 letterSpacing={1}
                             >
-                                <TextPath href="#qzTextPath" startOffset="25%" textAnchor="middle">
+                                <TextPath href="#qzTextPath" startOffset="27%" textAnchor="middle">
                                     QZ Web Solutions
                                 </TextPath>
                             </SvgText>
@@ -234,15 +234,18 @@ export default function TankGauge({ porcentaje, capacidad_litros = 100, size = 2
                     { alignItems: 'center', justifyContent: 'center' },
                     animatedNeedleStyle
                 ]}>
-                    {/* Shadow for needle */}
+                    {/* Shadow for needle - properly aligned and offset */}
                     <View style={{
-                        width: size * 0.015,
-                        height: radius * 1.05,
-                        backgroundColor: 'rgba(0,0,0,0.2)',
-                        left: size * 0.015,
-                        top: size * 0.01,
                         position: 'absolute',
-                        bottom: (radius * 1.05) / 2 - (radius * 0.1),
+                        width: Math.max(2, size * 0.025),
+                        height: radius * 1.05,
+                        backgroundColor: 'rgba(0,0,0,0.15)',
+                        bottom: (radius * 1.05) / 2 - (radius * 0.1) - (size * 0.008),
+                        transform: [{ translateX: size * 0.008 }],
+                        borderTopLeftRadius: size * 0.04,
+                        borderTopRightRadius: size * 0.04,
+                        borderBottomLeftRadius: 2,
+                        borderBottomRightRadius: 2,
                     }} />
 
                     {/* Realistic Needle (Sword Shape) */}

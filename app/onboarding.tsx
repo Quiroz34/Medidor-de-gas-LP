@@ -6,9 +6,13 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { actualizarConfiguracion } from '../services/database';
+import * as ExpoLocation from 'expo-location';
+import { actualizarConfiguracion, Configuracion } from '../services/database';
+import { detectUserLocation } from '../services/locationService';
 
 import { useAlert } from '../services/alertContext';
+
+import { solicitarPermisosTotales } from '../services/permissions';
 
 export default function OnboardingScreen() {
     const { showAlert } = useAlert();
@@ -45,84 +49,81 @@ export default function OnboardingScreen() {
     const [tieneHorno, setTieneHorno] = useState(false);
     const [horasOperacion, setHorasOperacion] = useState('8');
     const [diasOperacion, setDiasOperacion] = useState('6');
+ 
+    // Regional/Precios
+    const [pais, setPais] = useState('México');
+    const [estado, setEstado] = useState('');
+    const [municipio, setMunicipio] = useState('');
+    const [actualizarPrecioAuto, setActualizarPrecioAuto] = useState(true);
+
+    const [pediendoPermisos, setPediendoPermisos] = useState(false);
+
+    const handleSolicitarPermisos = async () => {
+        setPediendoPermisos(true);
+        try {
+            const result = await solicitarPermisosTotales();
+            
+            // Si concedió ubicación, intentar auto-completar Estado y Municipio
+            if (result.location) {
+                const locationData = await detectUserLocation();
+                if (locationData) {
+                    setEstado(locationData.estado);
+                    setMunicipio(locationData.municipio);
+                    setPais(locationData.pais);
+                }
+            }
+            
+            setStep(2);
+        } catch (e) {
+            console.error(e);
+            setStep(2);
+        }
+        setPediendoPermisos(false);
+    };
 
     const handleFinalizar = async () => {
-        if (!cargaHabitual.trim() || !frecuenciaCarga.trim()) {
-            showAlert({ 
-                title: 'Información faltante', 
-                message: 'Por favor ingresa cuánto cargas normalmente y cada cuánto tiempo lo haces.',
-                type: 'warning'
-            });
-            return;
+        try {
+            const finalConfig: Partial<Configuracion> = {
+                nombre_usuario: nombre,
+                capacidad_litros: parseFloat(capacidad) || 100,
+                num_personas: parseInt(personas, 10) || 3,
+                alerta_dias: parseInt(alertaDias, 10) || 3,
+                onboarding_completo: true,
+                carga_habitual_litros: parseFloat(cargaHabitual) || 0,
+                frecuencia_carga_dias: parseInt(frecuenciaCarga, 10) || 30,
+                tipo_uso: tipoUso || 'casa',
+                veces_cocina_dia: parseInt(vecesCocina, 10) || 2,
+                minutos_cocina_dia: parseInt(minutosCocina, 10) || 60,
+                num_personas_baño: parseInt(personasBaño, 10) || 3,
+                tiempo_baño_min_promedio: parseInt(tiempoBaño, 10) || 15,
+                tiene_secadora: tieneSecadora,
+                tiene_calefaccion: tieneCalefaccion,
+                tiene_boiler: tieneBoiler,
+                num_personas_boiler: parseInt(personasBoiler, 10) || 3,
+                zona_climatica: zonaClimatica,
+                tipo_negocio: tipoNegocio as any,
+                num_quemadores_comerciales: parseInt(quemadores, 10) || 0,
+                num_freidoras: parseInt(freidoras, 10) || 0,
+                tiene_plancha: tienePlancha,
+                tiene_horno: tieneHorno,
+                horas_operacion_dia: parseFloat(horasOperacion) || 0,
+                dias_operacion_semana: parseInt(diasOperacion, 10) || 6,
+                pais: pais,
+                estado: estado,
+                municipio: municipio,
+                actualizar_precio_auto: actualizarPrecioAuto,
+            };
+
+            await actualizarConfiguracion(finalConfig);
+            router.replace('/(tabs)');
+        } catch (e) {
+            console.error(e);
+            showAlert({ title: 'Error', message: 'No se pudo guardar la configuración inicial.', type: 'error' });
         }
-
-        if (!nombre.trim()) {
-            showAlert({ 
-                title: 'Campo requerido', 
-                message: 'Por favor ingresa tu nombre.',
-                type: 'warning'
-            });
-            return;
-        }
-        const cap = parseFloat(capacidad);
-        const pers = parseInt(personas, 10);
-        const alerta = parseInt(alertaDias, 10);
-
-        const cargaH = parseFloat(cargaHabitual) || 0;
-        const freqC = parseInt(frecuenciaCarga, 10) || 30;
-
-        // Parsing casa
-        const vCocina = parseInt(vecesCocina, 10) || 2;
-        const mCocina = parseInt(minutosCocina, 10) || 60;
-        const pBaño = parseInt(personasBaño, 10) || pers;
-        const tBaño = parseInt(tiempoBaño, 10) || 15;
-
-        // Parsing negocio
-        const nQuemadores = parseInt(quemadores, 10) || 0;
-        const nFreidoras = parseInt(freidoras, 10) || 0;
-        const hOperacion = parseFloat(horasOperacion) || 0;
-        const dOperacion = parseInt(diasOperacion, 10) || 6;
-
-        if (isNaN(cap) || cap <= 0) {
-            showAlert({ 
-                title: 'Valor inválido', 
-                message: 'La capacidad del tanque debe ser mayor a 0.',
-                type: 'error'
-            });
-            return;
-        }
-
-        await actualizarConfiguracion({
-            nombre_usuario: nombre.trim(),
-            capacidad_litros: cap,
-            num_personas: isNaN(pers) ? 3 : pers,
-            alerta_dias: isNaN(alerta) ? 3 : alerta,
-            onboarding_completo: true,
-            carga_habitual_litros: cargaH,
-            frecuencia_carga_dias: freqC,
-            tipo_uso: tipoUso || 'casa',
-            veces_cocina_dia: vCocina,
-            minutos_cocina_dia: mCocina,
-            num_personas_baño: pBaño,
-            tiempo_baño_min_promedio: tBaño,
-            tipo_negocio: tipoNegocio as any,
-            num_quemadores_comerciales: nQuemadores,
-            num_freidoras: nFreidoras,
-            tiene_plancha: tienePlancha,
-            tiene_horno: tieneHorno,
-            tiene_secadora: tieneSecadora,
-            tiene_calefaccion: tieneCalefaccion,
-            horas_operacion_dia: hOperacion,
-            dias_operacion_semana: dOperacion,
-            tiene_boiler: tieneBoiler,
-            num_personas_boiler: parseInt(personasBoiler, 10) || 3,
-            zona_climatica: zonaClimatica,
-        });
-        router.replace('/(tabs)');
     };
 
     const nextStep = () => {
-        if (step === 1) {
+        if (step === 2) {
             if (!nombre.trim()) {
                 showAlert({ 
                     title: 'Información faltante', 
@@ -140,7 +141,7 @@ export default function OnboardingScreen() {
                 });
                 return;
             }
-        } else if (step === 2) {
+        } else if (step === 3) {
             if (!tipoUso) {
                 showAlert({ 
                     title: 'Falta selección', 
@@ -149,7 +150,7 @@ export default function OnboardingScreen() {
                 });
                 return;
             }
-        } else if (step === 3) {
+        } else if (step === 4) {
             if (tipoUso === 'casa') {
                 if (!personas.trim() || !vecesCocina.trim() || !minutosCocina.trim() || !personasBaño.trim() || !tiempoBaño.trim()) {
                     showAlert({ 
@@ -206,13 +207,52 @@ export default function OnboardingScreen() {
                                     <Text style={styles.featureDesc}>Aprende de tu perfil y estima cuántos días te dura.</Text>
                                 </View>
                             </View>
-                            <TouchableOpacity style={styles.btnPrimary} onPress={nextStep}>
+                            <TouchableOpacity style={styles.btnPrimary} onPress={() => setStep(1)}>
                                 <Text style={styles.btnPrimaryText}>Comenzar →</Text>
                             </TouchableOpacity>
                         </View>
                     )}
 
+                    {/* PASO 1: PERMISOS */}
                     {step === 1 && (
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Funciones Premium</Text>
+                            <View style={{ marginBottom: 12 }}>
+                                <Text style={styles.featureDesc}>Para que la aplicación funcione al 100%, necesitamos algunos permisos básicos:</Text>
+                            </View>
+
+                            <View style={styles.permList}>
+                                <View style={styles.permItem}>
+                                    <MaterialCommunityIcons name="bell-ring" size={24} color="#FF6B35" />
+                                    <Text style={styles.permLabel}>Avisos de Gas Bajo</Text>
+                                </View>
+                                <View style={styles.permItem}>
+                                    <MaterialCommunityIcons name="calendar-check" size={24} color="#4ADE80" />
+                                    <Text style={styles.permLabel}>Agendar Recargas</Text>
+                                </View>
+                                <View style={styles.permItem}>
+                                    <MaterialCommunityIcons name="map-marker-radius" size={24} color="#3B82F6" />
+                                    <Text style={styles.permLabel}>Precios Regionales</Text>
+                                </View>
+                                <View style={styles.permItem}>
+                                    <MaterialCommunityIcons name="account-group" size={24} color="#FACC15" />
+                                    <Text style={styles.permLabel}>Elegir tu Gasero</Text>
+                                </View>
+                            </View>
+
+                            <TouchableOpacity 
+                                style={[styles.btnPrimary, pediendoPermisos && { opacity: 0.7 }]} 
+                                onPress={handleSolicitarPermisos}
+                                disabled={pediendoPermisos}
+                            >
+                                <Text style={styles.btnPrimaryText}>
+                                    {pediendoPermisos ? 'Habilitando...' : 'Habilitar Funciones →'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                    {step === 2 && (
                         <View style={styles.card}>
                             <Text style={styles.cardTitle}>Paso 1: Perfil Básico</Text>
                             <Text style={styles.label}>Tu nombre</Text>
@@ -228,13 +268,35 @@ export default function OnboardingScreen() {
                             </View>
                             <TextInput style={styles.input} placeholder="Otro valor en litros" keyboardType="numeric" value={capacidad} onChangeText={setCapacidad} placeholderTextColor="#4A6080" />
 
-                            <TouchableOpacity style={styles.btnPrimary} onPress={nextStep}>
+                            {/* Ubicación para precios automáticos */}
+                            <Text style={[styles.label, { marginTop: 12 }]}>Ubícanos para darte precios automáticos</Text>
+                            <Text style={styles.featureDesc}>Esto ayuda a obtener el precio vigente de tu región.</Text>
+                            
+                            <Text style={styles.label}>País</Text>
+                            <TextInput style={styles.input} value={pais} onChangeText={setPais} placeholder="México" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>Estado / Provincia</Text>
+                            <TextInput style={styles.input} value={estado} onChangeText={setEstado} placeholder="Ej. CDMX o Guanajuato" placeholderTextColor="#4A6080" />
+
+                            <Text style={styles.label}>Municipio / Ciudad</Text>
+                            <TextInput style={styles.input} value={municipio} onChangeText={setMunicipio} placeholder="Ej. León" placeholderTextColor="#4A6080" />
+
+                            <TouchableOpacity
+                                style={[styles.optionBtn, actualizarPrecioAuto && styles.optionBtnActive, { marginTop: 8, paddingVertical: 12 }]}
+                                onPress={() => setActualizarPrecioAuto(!actualizarPrecioAuto)}
+                            >
+                                <Text style={[styles.optionText, actualizarPrecioAuto && styles.optionTextActive, { textAlign: 'center' }]}>
+                                    {actualizarPrecioAuto ? '✓ Precio automático activo' : '+ Activar precio automático'}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity style={[styles.btnPrimary, { marginTop: 24 }]} onPress={nextStep}>
                                 <Text style={styles.btnPrimaryText}>Siguiente</Text>
                             </TouchableOpacity>
                         </View>
                     )}
 
-                    {step === 2 && (
+                    {step === 3 && (
                         <View style={styles.card}>
                             <Text style={styles.cardTitle}>Paso 2: Tipo de Uso</Text>
                             <Text style={styles.featureDesc}>Esto ayuda a la IA a calcular cómo se consume tu gas.</Text>
@@ -274,7 +336,7 @@ export default function OnboardingScreen() {
                         </View>
                     )}
 
-                    {step === 3 && tipoUso === 'casa' && (
+                    {step === 4 && tipoUso === 'casa' && (
                         <View style={styles.card}>
                             <Text style={styles.cardTitle}>Paso 3: Hábitos del Hogar</Text>
 
@@ -364,7 +426,7 @@ export default function OnboardingScreen() {
                         </View>
                     )}
 
-                    {step === 3 && tipoUso === 'negocio' && (
+                    {step === 4 && tipoUso === 'negocio' && (
                         <View style={styles.card}>
                             <Text style={styles.cardTitle}>Paso 3: Equipos de Negocio</Text>
                             <Text style={styles.featureDesc}>Describe brevemente tu negocio y equipos.</Text>
@@ -414,9 +476,9 @@ export default function OnboardingScreen() {
                         </View>
                     )}
 
-                    {step === 4 && (
+                    {step === 5 && (
                         <View style={styles.card}>
-                            <Text style={styles.cardTitle}>Paso 3: Historial de Carga</Text>
+                            <Text style={styles.cardTitle}>Paso 4: Historial de Carga</Text>
 
                             <Text style={styles.label}>¿Cuánto cargas normalmente? (Litros)</Text>
                             <TextInput style={styles.input} keyboardType="numeric" value={cargaHabitual} onChangeText={setCargaHabitual} placeholder="Ej. 100" placeholderTextColor="#4A6080" />
@@ -519,4 +581,8 @@ const styles = StyleSheet.create({
     usoTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginTop: 12 },
     usoTextActive: { color: '#FF6B35' },
     usoDesc: { color: '#94A3B8', fontSize: 13, marginTop: 6, textAlign: 'center' },
+    // Permisos styles
+    permList: { marginTop: 24, gap: 16, marginBottom: 24 },
+    permItem: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#0D1B2A', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#1E3A5F' },
+    permLabel: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
 });

@@ -44,17 +44,16 @@ export default function HistorialScreen() {
     for (let i = lecturas.length - 1; i > 0; i--) {
         const anterior = lecturas[i];
         const actual = lecturas[i - 1];
-        const dias = Math.max(
-            1,
-            (new Date(actual.fecha).getTime() - new Date(anterior.fecha).getTime()) / 86400000,
-        );
-        const consumoKg = Math.max(0, anterior.kg_restantes - actual.kg_restantes);
+        const diffMs = new Date(actual.fecha).getTime() - new Date(anterior.fecha).getTime();
+        const dias = Math.max(0.1, diffMs / 86400000); // Evitar división por cero
+        
+        const consumoLitros = Math.max(0, anterior.kg_restantes - actual.kg_restantes);
         consumos.push({
             fecha: new Date(actual.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }),
-            consumo: Math.round((consumoKg / dias) * 10) / 10,
+            consumo: Math.round((consumoLitros / dias) * 10) / 10,
         });
     }
-    const maxConsumo = Math.max(...consumos.map((c) => c.consumo), 0.01);
+    const maxConsumo = Math.max(...consumos.map((c) => c.consumo), 0.1);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -66,7 +65,7 @@ export default function HistorialScreen() {
                     <View style={styles.card}>
                         <View style={styles.cardHeader}>
                             <MaterialCommunityIcons name="chart-bar" size={18} color="#FF6B35" />
-                            <Text style={styles.cardTitle}>Consumo diario (kg/día)</Text>
+                            <Text style={styles.cardTitle}>Consumo diario (L/día)</Text>
                         </View>
                         <View style={styles.barsContainer}>
                             {consumos.slice(-7).map((c, i) => (
@@ -114,7 +113,7 @@ export default function HistorialScreen() {
                                     {l.notas ? <Text style={styles.rowNotas}>{l.notas}</Text> : null}
                                 </View>
                                 <Text style={styles.rowNivel}>{l.nivel_porcentaje}%</Text>
-                                <Text style={styles.rowKg}>{l.kg_restantes.toFixed(1)} kg</Text>
+                                <Text style={styles.rowKg}>{l.kg_restantes.toFixed(1)} L</Text>
                                 <TouchableOpacity onPress={() => handleEliminar(l.id!)}>
                                     <MaterialCommunityIcons name="trash-can-outline" size={18} color="#4A6080" />
                                 </TouchableOpacity>

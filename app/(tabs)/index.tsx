@@ -9,6 +9,7 @@ import TankGauge from '../../components/TankGauge';
 import {
     obtenerUltimasLecturas,
     obtenerConfiguracion,
+    actualizarConfiguracion,
     obtenerEventosExtra,
     obtenerFactoresUsuario,
     Lectura,
@@ -16,6 +17,8 @@ import {
     FactorUsuario,
 } from '../../services/database';
 import { predecirConsumo, Prediccion, estimarNivelActual, litrosAPorcentaje } from '../../services/ai';
+import { detectUserLocation } from '../../services/locationService';
+import { fetchCurrentGasPrice } from '../../services/priceService';
 import { programarRecordatorio } from '../../services/notifications';
 import { addEventToCalendar } from '../../services/calendar';
 import { useAlert } from '../../services/alertContext';
@@ -30,7 +33,40 @@ export default function HomeScreen() {
     const [factoresUsuario, setFactoresUsuario] = useState<FactorUsuario[]>([]);
 
     const cargarDatos = useCallback(async () => {
-        const cfg = await obtenerConfiguracion();
+        let cfg = await obtenerConfiguracion();
+
+        // Sincronizar precio antes de predecir (para que el costo sea real)
+        if (cfg.actualizar_precio_auto) {
+            // Si no tiene ubicación y el precio auto está activo, intentar detectarla una vez
+            if (!cfg.estado || !cfg.municipio) {
+                try {
+                    const locData = await detectUserLocation();
+                    if (locData) {
+                        const updatedCfg = { 
+                            ...cfg, 
+                            estado: locData.estado, 
+                            municipio: locData.municipio,
+                            pais: locData.pais
+                        };
+                        await actualizarConfiguracion(updatedCfg);
+                        cfg = updatedCfg;
+                    }
+                } catch (e) {
+                    console.warn("No se pudo auto-detectar ubicación en Home:", e);
+                }
+            }
+
+            try {
+                const livePrice = await fetchCurrentGasPrice(cfg);
+                if (livePrice && livePrice !== cfg.precio_litro_actual) {
+                    await actualizarConfiguracion({ precio_litro_actual: livePrice });
+                    cfg = { ...cfg, precio_litro_actual: livePrice };
+                }
+            } catch (e) {
+                console.warn("No se pudo auto-sincronizar el precio en Home:", e);
+            }
+        }
+
         const lects = await obtenerUltimasLecturas(60); // Más lecturas para el multi-ciclo
         const evts = await obtenerEventosExtra();
         const factores = await obtenerFactoresUsuario();
