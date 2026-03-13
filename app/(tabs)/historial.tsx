@@ -58,7 +58,7 @@ export default function HistorialScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <ScrollView contentContainerStyle={styles.scroll}>
+            <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
                 <Text style={styles.title}>Historial de Consumo</Text>
 
                 {/* Gráfica manual de barras */}
@@ -130,7 +130,7 @@ export default function HistorialScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0D1B2A' },
     scroll: { padding: 20, paddingBottom: 40 },
-    title: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 20 },
+    title: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginTop: 40, marginBottom: 20 },
     card: {
         backgroundColor: '#132338', borderRadius: 16, padding: 18,
         borderWidth: 1, borderColor: '#1E3A5F', marginBottom: 16,

@@ -34,6 +34,7 @@ export default function TabLayout() {
                 name="historial"
                 options={{
                     title: 'Historial',
+                    tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 3 },
                     tabBarIcon: ({ color, size }) => (
                         <MaterialCommunityIcons name="chart-line" color={color} size={size} />
                     ),
@@ -43,6 +44,7 @@ export default function TabLayout() {
                 name="gasero"
                 options={{
                     title: 'Gasero',
+                    tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 3 },
                     tabBarIcon: ({ color, size }) => (
                         <MaterialCommunityIcons name="truck-delivery" color={color} size={size} />
                     ),
@@ -52,6 +54,7 @@ export default function TabLayout() {
                 name="extras"
                 options={{
                     title: 'Extras',
+                    tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 3 },
                     tabBarIcon: ({ color, size }) => (
                         <MaterialCommunityIcons name="plus-box" color={color} size={size} />
                     ),
@@ -61,6 +64,7 @@ export default function TabLayout() {
                 name="configuracion"
                 options={{
                     title: 'Configuración',
+                    tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 3 },
                     tabBarIcon: ({ color, size }) => (
                         <MaterialCommunityIcons name="cog" color={color} size={size} />
                     ),

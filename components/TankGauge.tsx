@@ -181,7 +181,7 @@ export default function TankGauge({ porcentaje, capacidad_litros = 100, size = 2
                                 fontWeight="900"
                                 letterSpacing={1}
                             >
-                                <TextPath href="#qzTextPath" startOffset="35%" textAnchor="middle">
+                                <TextPath href="#qzTextPath" startOffset="25%" textAnchor="middle">
                                     QZ Web Solutions
                                 </TextPath>
                             </SvgText>

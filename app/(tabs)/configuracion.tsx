@@ -10,16 +10,19 @@ import {
     actualizarConfiguracion,
     eliminarTodasLecturas,
     Configuracion,
+    obtenerLecturas,
 } from '@/services/database';
-import { cancelarRecordatorios } from '@/services/notifications';
+import { cancelarRecordatorios, solicitarPermisos } from '@/services/notifications';
+import * as Notifications from 'expo-notifications';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 import { useAlert } from '@/services/alertContext';
 
 export default function ConfiguracionScreen() {
     const { showAlert } = useAlert();
     const [config, setConfig] = useState<Configuracion>({
-        // ... (valores iniciales)
-        capacidad_litros: 30,
+        capacidad_litros: 100,
         num_personas: 3,
         nombre_usuario: '',
         alerta_dias: 3,
@@ -40,6 +43,10 @@ export default function ConfiguracionScreen() {
         dias_operacion_semana: 6,
         tiene_secadora: false,
         tiene_calefaccion: false,
+        tiene_boiler: true,
+        num_personas_boiler: 3,
+        zona_climatica: 'centro',
+        precio_litro_actual: undefined,
     });
     const [guardado, setGuardado] = useState(false);
     const [notificaciones, setNotificaciones] = useState(true);
@@ -72,6 +79,83 @@ export default function ConfiguracionScreen() {
         setTimeout(() => setGuardado(false), 2000);
     };
 
+    const handleProbarNotificacion = async () => {
+        const hasPermission = await solicitarPermisos();
+        if (!hasPermission) {
+            showAlert({
+                title: 'Permiso denegado',
+                message: 'No has concedido permisos de notificación. Por favor, actívalos en los ajustes de tu celular.',
+                type: 'error',
+            });
+            return;
+        }
+
+        await Notifications.scheduleNotificationAsync({
+            content: {
+                title: '🔔 Notificación de Prueba',
+                body: '¡Funciona! Así recibirás los avisos cuando tu gas esté bajo.',
+                data: { test: true },
+            },
+            trigger: null, // Mostrar inmediatamente
+        });
+
+        showAlert({
+            title: 'Notificación enviada',
+            message: 'Deberías ver una notificación de prueba en tu barra de estado en unos segundos.',
+            type: 'success',
+        });
+    };
+
+    const handleExportarCSV = async () => {
+        try {
+            const lecturas = await obtenerLecturas();
+            if (lecturas.length === 0) {
+                showAlert({
+                    title: 'Sin datos',
+                    message: 'No hay lecturas registradas para exportar.',
+                    type: 'warning'
+                });
+                return;
+            }
+
+            // Crear el contenido CSV
+            let csv = 'ID,Fecha,Nivel(%),Litros Restantes,Es Carga,Litros Cargados,Monto($),Precio/L,Notas\n';
+            lecturas.forEach(l => {
+                const fecha = new Date(l.fecha).toLocaleString();
+                csv += `${l.id},"${fecha}",${l.nivel_porcentaje},${l.kg_restantes},${l.es_carga ? 'SÍ' : 'NO'},${l.litros_cargados || ''},${l.monto_dinero || ''},${l.precio_litro || ''},"${l.notas || ''}"\n`;
+            });
+
+            // Guardar archivo temporal
+            const fileName = `historial_gaslp_${new Date().getTime()}.csv`;
+            // @ts-ignore - Some versions of expo-file-system types might differ
+            const fileUri = `${FileSystem.cacheDirectory || FileSystem.documentDirectory}${fileName}`;
+            // @ts-ignore
+            await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType?.UTF8 || 'utf8' });
+
+            // Compartir
+            if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(fileUri, {
+                    mimeType: 'text/csv',
+                    dialogTitle: 'Exportar Historial de Gas LP',
+                    UTI: 'public.comma-separated-values-text'
+                });
+            } else {
+                showAlert({
+                    title: 'No disponible',
+                    message: 'La función de compartir no está disponible en este dispositivo.',
+                    type: 'error'
+                });
+            }
+        } catch (e) {
+            console.error(e);
+            showAlert({
+                title: 'Error',
+                message: 'No se pudo generar el archivo CSV.',
+                type: 'error'
+            });
+        }
+    };
+
     const handleResetDatos = () => {
         showAlert({
             title: 'Borrar todos los datos',
@@ -93,7 +177,7 @@ export default function ConfiguracionScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <ScrollView contentContainerStyle={styles.scroll}>
+            <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
                 <Text style={styles.title}>Configuración</Text>
 
                 {/* Perfil */}
@@ -215,20 +299,6 @@ export default function ConfiguracionScreen() {
                                 onChangeText={(v) => setConfig({ ...config, minutos_cocina_dia: parseInt(v, 10) || 0 })}
                                 keyboardType="numeric"
                             />
-                            <Text style={styles.label}>Personas que se bañan a diario</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={String(config.num_personas_baño)}
-                                onChangeText={(v) => setConfig({ ...config, num_personas_baño: parseInt(v, 10) || 0 })}
-                                keyboardType="numeric"
-                            />
-                            <Text style={styles.label}>Tiempo promedio de baño (minutos)</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={String(config.tiempo_baño_min_promedio)}
-                                onChangeText={(v) => setConfig({ ...config, tiempo_baño_min_promedio: parseInt(v, 10) || 0 })}
-                                keyboardType="numeric"
-                            />
                             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
                                 <TouchableOpacity
                                     style={[styles.optionBtn, config.tiene_secadora && styles.optionBtnActive, { flex: 1 }]}
@@ -246,6 +316,63 @@ export default function ConfiguracionScreen() {
                                         {config.tiene_calefaccion ? '✓ Calefacción' : '+ Calefacción'}
                                     </Text>
                                 </TouchableOpacity>
+                            </View>
+
+                            {/* Boiler */}
+                            <Text style={styles.label}>¿Tienes calentador de agua (boiler) a gas?</Text>
+                            <View style={{ flexDirection: 'row', gap: 10 }}>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, config.tiene_boiler && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setConfig({ ...config, tiene_boiler: true })}
+                                >
+                                    <Text style={[styles.optionText, config.tiene_boiler && styles.optionTextActive, { textAlign: 'center' }]}>Sí</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, !config.tiene_boiler && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setConfig({ ...config, tiene_boiler: false })}
+                                >
+                                    <Text style={[styles.optionText, !config.tiene_boiler && styles.optionTextActive, { textAlign: 'center' }]}>No</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {config.tiene_boiler && (
+                                <>
+                                    <Text style={styles.label}>Personas que se bañan a diario</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={String(config.num_personas_baño)}
+                                        onChangeText={(v) => setConfig({ ...config, num_personas_baño: parseInt(v, 10) || 0 })}
+                                        keyboardType="numeric"
+                                    />
+                                    <Text style={styles.label}>Tiempo promedio de baño (minutos)</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={String(config.tiempo_baño_min_promedio)}
+                                        onChangeText={(v) => setConfig({ ...config, tiempo_baño_min_promedio: parseInt(v, 10) || 0 })}
+                                        keyboardType="numeric"
+                                    />
+                                    <Text style={styles.label}>¿Cuántas personas usan el boiler?</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={String(config.num_personas_boiler)}
+                                        onChangeText={(v) => setConfig({ ...config, num_personas_boiler: parseInt(v, 10) || 0 })}
+                                        keyboardType="numeric"
+                                    />
+                                </>
+                            )}
+
+                            {/* Zona climática */}
+                            <Text style={styles.label}>Zona climática de tu ciudad</Text>
+                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                                {([['norte', '❄️ Norte'], ['centro', '🌤️ Centro'], ['sur', '☀️ Sur']] as const).map(([val, label]) => (
+                                    <TouchableOpacity
+                                        key={val}
+                                        style={[styles.optionBtn, config.zona_climatica === val && styles.optionBtnActive, { flex: 1, alignItems: 'center' }]}
+                                        onPress={() => setConfig({ ...config, zona_climatica: val })}
+                                    >
+                                        <Text style={[styles.optionText, config.zona_climatica === val && styles.optionTextActive, { textAlign: 'center' }]}>{label}</Text>
+                                    </TouchableOpacity>
+                                ))}
                             </View>
                         </>
                     ) : (
@@ -331,6 +458,11 @@ export default function ConfiguracionScreen() {
                             </TouchableOpacity>
                         ))}
                     </View>
+
+                    <TouchableOpacity style={styles.btnTest} onPress={handleProbarNotificacion}>
+                        <MaterialCommunityIcons name="bell-ring-outline" size={20} color="#FF6B35" />
+                        <Text style={styles.btnTestText}>Probar Notificación</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {/* Botón guardar */}
@@ -345,6 +477,19 @@ export default function ConfiguracionScreen() {
                     />
                     <Text style={styles.btnSaveText}>{guardado ? '¡Guardado!' : 'Guardar cambios'}</Text>
                 </TouchableOpacity>
+
+                {/* Datos y Backup */}
+                <View style={styles.card}>
+                    <View style={styles.sectionHeader}>
+                        <MaterialCommunityIcons name="database-export" size={16} color="#4ADE80" />
+                        <Text style={[styles.sectionTitle, { color: '#4ADE80' }]}>Datos y Respaldo</Text>
+                    </View>
+                    <Text style={styles.description}>Exporta tu historial de lecturas a un archivo Excel/CSV compatible para tener tu propio respaldo local.</Text>
+                    <TouchableOpacity style={styles.btnExport} onPress={handleExportarCSV}>
+                        <MaterialCommunityIcons name="file-export" size={20} color="#4ADE80" />
+                        <Text style={styles.btnExportText}>Exportar Historial (CSV)</Text>
+                    </TouchableOpacity>
+                </View>
 
                 {/* Peligro */}
                 <View style={styles.card}>
@@ -365,7 +510,7 @@ export default function ConfiguracionScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0D1B2A' },
     scroll: { padding: 20, paddingBottom: 40 },
-    title: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 20 },
+    title: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginTop: 40, marginBottom: 20 },
     card: {
         backgroundColor: '#132338', borderRadius: 16, padding: 18,
         borderWidth: 1, borderColor: '#1E3A5F', marginBottom: 16,
@@ -400,6 +545,24 @@ const styles = StyleSheet.create({
     },
     btnDangerText: { color: '#F87171', fontSize: 14, fontWeight: '600' },
     usoContainer: { flexDirection: 'row', gap: 10, marginTop: 4, marginBottom: 12 },
+    description: { fontSize: 13, color: '#94A3B8', marginBottom: 12, lineHeight: 18 },
+    btnExport: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#4ADE8015',
+        borderWidth: 1,
+        borderColor: '#4ADE8040',
+        borderRadius: 12,
+        paddingVertical: 14,
+        marginTop: 5,
+    },
+    btnExportText: {
+        color: '#4ADE80',
+        fontSize: 14,
+        fontWeight: '700',
+    },
     usoCard: {
         flex: 1, backgroundColor: '#0D1B2A', borderWidth: 2, borderColor: '#1E3A5F',
         borderRadius: 12, padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8
@@ -407,4 +570,21 @@ const styles = StyleSheet.create({
     usoCardActive: { borderColor: '#FF6B35', backgroundColor: '#FF6B3510' },
     usoTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
     usoTextActive: { color: '#FF6B35' },
+    btnTest: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#FF6B3515',
+        borderWidth: 1,
+        borderColor: '#FF6B3540',
+        borderRadius: 12,
+        paddingVertical: 14,
+        marginTop: 15,
+    },
+    btnTestText: {
+        color: '#FF6B35',
+        fontSize: 14,
+        fontWeight: '700',
+    },
 });

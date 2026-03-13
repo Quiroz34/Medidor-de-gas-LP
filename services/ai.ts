@@ -1,4 +1,4 @@
-import type { Lectura, Configuracion, EventoExtra } from './database';
+import type { Lectura, Configuracion, EventoExtra, FactorUsuario } from './database';
 
 export interface Prediccion {
     dias_restantes: number | null;
@@ -6,230 +6,319 @@ export interface Prediccion {
     tasa_consumo_diaria: number | null;
     confianza: 'alta' | 'media' | 'baja' | 'insuficiente' | 'perfil';
     mensaje: string;
-    alertas?: string[]; // Nuevas alertas inteligentes
+    alertas?: string[];
+    costo_estimado?: number | null;   // NUEVO: costo estimado próxima recarga
 }
 
-// Factores de consumo por mes (1.0 = base, >1.0 = más consumo en frío, <1.0 = menos consumo)
-const FACTORES_ESTACIONALES: { [key: number]: number } = {
-    0: 1.25, // Enero (+)
-    1: 1.20, // Febrero (+)
-    2: 1.05, // Marzo
-    3: 0.95, // Abril
-    4: 0.90, // Mayo (-)
-    5: 0.85, // Junio (-)
-    6: 0.85, // Julio (-)
-    7: 0.90, // Agosto (-)
-    8: 0.95, // Septiembre
-    9: 1.10, // Octubre
-    10: 1.25, // Noviembre (+)
-    11: 1.35, // Diciembre (++)
+// ── FACTORES ESTACIONALES POR ZONA CLIMÁTICA ────────────────────────────────
+// Cada zona tiene sus propios multiplicadores por mes (1.0 = consumo base)
+const FACTORES_POR_ZONA: Record<'norte' | 'centro' | 'sur', Record<number, number>> = {
+    norte: {
+        0: 1.55, // Enero — inviernos muy fríos (Monterrey, Chihuahua, etc.)
+        1: 1.50,
+        2: 1.20,
+        3: 1.00,
+        4: 0.90,
+        5: 0.85,
+        6: 0.85,
+        7: 0.88,
+        8: 0.95,
+        9: 1.10,
+        10: 1.40,
+        11: 1.60,
+    },
+    centro: {
+        0: 1.25, // Enero (CDMX, Guadalajara, Puebla)
+        1: 1.20,
+        2: 1.05,
+        3: 0.95,
+        4: 0.90,
+        5: 0.85,
+        6: 0.85,
+        7: 0.90,
+        8: 0.95,
+        9: 1.10,
+        10: 1.25,
+        11: 1.35,
+    },
+    sur: {
+        0: 1.05, // Enero — climas cálidos todo el año (Cancún, Mérida, Oaxaca)
+        1: 1.05,
+        2: 1.00,
+        3: 0.98,
+        4: 0.95,
+        5: 0.95,
+        6: 0.95,
+        7: 0.95,
+        8: 0.98,
+        9: 1.00,
+        10: 1.05,
+        11: 1.10,
+    },
 };
 
-// ── REGRESIÓN LINEAL (implementada desde cero) ──────────
+// ── ALERTA DINÁMICA DE DÍA DE RECARGA ───────────────────────────────────────
+const DIAS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+function getAlertaDiaRecarga(fechaRecarga: Date, diasRestantes: number): string | null {
+    if (diasRestantes <= 0 || diasRestantes > 20) return null; // Solo avisamos si es relevante
+    const diaRecarga = fechaRecarga.getDay(); // 0=dom ... 6=sáb
+
+    // Calcular fecha sugerida (2 días antes)
+    const fechaSugerida = new Date(fechaRecarga);
+    fechaSugerida.setDate(fechaSugerida.getDate() - 2);
+    const diaSugerido = DIAS_ES[fechaSugerida.getDay()];
+    const fechaFmt = `${fechaRecarga.getDate()}/${fechaRecarga.getMonth() + 1}`;
+
+    // Si se termina en fin de semana, el mensaje es más urgente
+    const esFinDeSemana = diaRecarga === 0 || diaRecarga === 6;
+
+    if (esFinDeSemana) {
+        return `📅 Tu gas se terminará el ${DIAS_ES[diaRecarga]} ${fechaFmt}. Los gaseros suelen no trabajar ese día — recarga el ${diaSugerido}.`;
+    } else {
+        return `📅 Tu gas se terminará el ${DIAS_ES[diaRecarga]} ${fechaFmt}. Te sugerimos recargar el ${diaSugerido} para no quedarte sin gas.`;
+    }
+}
 
 interface PuntoDato {
     x: number; // días desde la primera lectura
     y: number; // litros_restantes
 }
 
-// ... (regresionLineal y calcularR2 se mantienen iguales, pero conceptualmente x es litros) ...
+// ── TASA HISTÓRICA MULTI-CICLO ───────────────────────────────────────────────
+/**
+ * Extrae todos los ciclos de consumo del historial completo y calcula
+ * un promedio ponderado. Los ciclos más recientes tienen más peso.
+ * Retorna null si no hay suficientes datos históricos.
+ */
+function calcularTasaHistorica(todasLasLecturas: Lectura[]): number | null {
+    if (todasLasLecturas.length < 4) return null;
 
-// ── FUNCIÓN PRINCIPAL DE PREDICCIÓN ─────────────────────
+    const ordenadas = [...todasLasLecturas].sort(
+        (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
+    );
 
-export function predecirConsumo(lecturas: Lectura[], config: Configuracion, eventosExtra: EventoExtra[] = []): Prediccion {
-    // Ordenar por fecha ascendente
+    // Encontrar límites de ciclos (recargas detectadas)
+    const iniciosCiclos: number[] = [0];
+    for (let i = 1; i < ordenadas.length; i++) {
+        const anterior = ordenadas[i - 1].nivel_porcentaje;
+        const actual = ordenadas[i].nivel_porcentaje;
+        if (actual > anterior + 10 || ordenadas[i].es_carga) {
+            iniciosCiclos.push(i);
+        }
+    }
+
+    if (iniciosCiclos.length < 2) return null; // Solo 1 ciclo, no hay histórico
+
+    // Calcular la tasa de cada ciclo completo (no el actual para no distorsionar)
+    const tasasPorCiclo: number[] = [];
+    for (let c = 0; c < iniciosCiclos.length - 1; c++) {
+        const desde = iniciosCiclos[c];
+        const hasta = iniciosCiclos[c + 1];
+        const segmento = ordenadas.slice(desde, hasta);
+        if (segmento.length < 2) continue;
+
+        const primeraFecha = new Date(segmento[0].fecha).getTime();
+        const ultimaFecha = new Date(segmento[segmento.length - 1].fecha).getTime();
+        const dias = (ultimaFecha - primeraFecha) / (1000 * 60 * 60 * 24);
+        const litrosConsumidos = segmento[0].kg_restantes - segmento[segmento.length - 1].kg_restantes;
+
+        if (dias > 1 && litrosConsumidos > 0) {
+            tasasPorCiclo.push(litrosConsumidos / dias);
+        }
+    }
+
+    if (tasasPorCiclo.length === 0) return null;
+
+    // Promedio ponderado: ciclos más recientes tienen más peso
+    let sumaPonderada = 0;
+    let sumaPesos = 0;
+    for (let i = 0; i < tasasPorCiclo.length; i++) {
+        const peso = i + 1; // peso crece con el índice (más reciente = mayor peso)
+        sumaPonderada += tasasPorCiclo[i] * peso;
+        sumaPesos += peso;
+    }
+
+    return sumaPonderada / sumaPesos;
+}
+
+// ── TASA DEL PERFIL DEL USUARIO ──────────────────────────────────────────────
+export function calcularTasaPerfil(config: Configuracion): number {
+    if (config.tipo_uso === 'negocio') {
+        const consumoTotalPorHora =
+            (config.num_quemadores_comerciales * 0.15) +
+            (config.num_freidoras * 0.40) +
+            (config.tiene_plancha ? 0.30 : 0) +
+            (config.tiene_horno ? 0.50 : 0);
+        const factorDias = config.dias_operacion_semana / 7;
+        const tasa = (consumoTotalPorHora * config.horas_operacion_dia) * factorDias;
+        return Math.max(2.0, tasa);
+    }
+
+    // Casa
+    const horasCocina = (config.minutos_cocina_dia || 60) / 60;
+    const consumoCocina = horasCocina * 0.15 * (config.veces_cocina_dia || 2);
+
+    // Regadera + calentador de agua
+    const factorBaño = (config.tiempo_baño_min_promedio || 15) / 15;
+    const consumoRegadera = (config.num_personas_baño || 0) * (0.15 * factorBaño); // Solo el agua fría que calienta
+
+    // Boiler (calentador de agua) — es el mayor consumidor
+    const consumoBoiler = config.tiene_boiler
+        ? (config.num_personas_boiler || config.num_personas || 3) * 0.35
+        : 0;
+
+    const consumoSecadora = config.tiene_secadora ? 0.4 : 0;
+    const consumoCalefaccion = config.tiene_calefaccion ? 1.0 : 0;
+
+    let tasa = consumoCocina + consumoRegadera + consumoBoiler + consumoSecadora + consumoCalefaccion;
+
+    // Si el usuario reportó sus propias estadísticas de carga, es más confiable
+    if (config.carga_habitual_litros > 0 && config.frecuencia_carga_dias > 0) {
+        tasa = config.carga_habitual_litros / config.frecuencia_carga_dias;
+    }
+
+    return Math.max(0.5, tasa);
+}
+
+// ── FACTOR ESTACIONAL ─────────────────────────────────────────────────────────
+function getFactorEstacional(
+    mes: number,
+    zona: 'norte' | 'centro' | 'sur',
+    factoresPersonalizados: FactorUsuario[]
+): number {
+    // Si el usuario ya tiene un factor real aprendido para este mes, lo usamos
+    const personalizado = factoresPersonalizados.find(f => f.mes === mes);
+    if (personalizado && personalizado.num_muestras >= 2) {
+        // Mezcla: 60% factor aprendido del usuario + 40% factor genérico por zona
+        const generico = FACTORES_POR_ZONA[zona][mes] ?? 1.0;
+        return personalizado.factor_real * 0.6 + generico * 0.4;
+    }
+    return FACTORES_POR_ZONA[zona][mes] ?? 1.0;
+}
+
+// ── FUNCIÓN PRINCIPAL DE PREDICCIÓN ─────────────────────────────────────────
+
+export function predecirConsumo(
+    lecturas: Lectura[],
+    config: Configuracion,
+    eventosExtra: EventoExtra[] = [],
+    factoresUsuario: FactorUsuario[] = []
+): Prediccion {
     const ordenadas = [...lecturas].sort(
         (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime(),
     );
 
-    // ESCENARIO A: No hay suficientes datos (Regresión no posible)
-    // Usamos el perfil del usuario para dar una estimación inicial
+    const mesActual = new Date().getMonth();
+    const zona = config.zona_climatica || 'centro';
+    const factorEstacional = getFactorEstacional(mesActual, zona, factoresUsuario);
+    const tasaHistorica = calcularTasaHistorica(ordenadas);
+
+    // ESCENARIO A: Sin datos suficientes → estimación por perfil
     if (ordenadas.length < 2) {
-        let tasaEstimada = 0.8;
-
-        if (config.tipo_uso === 'negocio') {
-            // Cálculo para Negocios (litros por hora aproximados)
-            const consumoQuemadorHora = 0.15; // 150 gramos/litros aprox por hora por quemador
-            const consumoFreidoraHora = 0.40; // 400 gramos/litros aprox por hora de freidora
-            const consumoPlanchaHora = config.tiene_plancha ? 0.30 : 0;
-            const consumoHornoHora = config.tiene_horno ? 0.50 : 0;
-
-            const consumoTotalPorHora =
-                (config.num_quemadores_comerciales * consumoQuemadorHora) +
-                (config.num_freidoras * consumoFreidoraHora) +
-                consumoPlanchaHora + consumoHornoHora;
-
-            // Ajuste por días a la semana
-            const factorDias = config.dias_operacion_semana / 7;
-            tasaEstimada = (consumoTotalPorHora * config.horas_operacion_dia) * factorDias;
-
-            if (tasaEstimada <= 0) tasaEstimada = 2.0; // Default mínimo para negocios
-        } else {
-            // Cálculo para Casa
-            // Consumo por estufa basado en minutos reportados (ej. 60 min = 1 hora)
-            const horasCocina = (config.minutos_cocina_dia || 60) / 60;
-            const consumoCocina = horasCocina * 0.15 * config.veces_cocina_dia;
-
-            // Consumo por baño
-            const factorBaño = config.tiempo_baño_min_promedio / 15;
-            const consumoBaño = config.num_personas_baño * (0.4 * factorBaño);
-
-            // Nuevos factores de consumo (Estimado diario)
-            const consumoSecadora = config.tiene_secadora ? 0.4 : 0;
-            const consumoCalefaccion = config.tiene_calefaccion ? 1.0 : 0;
-
-            tasaEstimada = consumoCocina + consumoBaño + consumoSecadora + consumoCalefaccion;
-
-            // Ajuste con el historial reportado si existe para casas
-            if (config.carga_habitual_litros > 0 && config.frecuencia_carga_dias > 0) {
-                const tasaReportada = config.carga_habitual_litros / config.frecuencia_carga_dias;
-                tasaEstimada = tasaReportada; // LEY
-            }
-
-            if (tasaEstimada <= 0) tasaEstimada = 0.8;
-        }
-
-        const mesActual = new Date().getMonth();
-        const factorEstacional = FACTORES_ESTACIONALES[mesActual] || 1.0;
-        tasaEstimada *= factorEstacional;
+        let tasaEstimada = calcularTasaPerfil(config) * factorEstacional;
 
         const litrosActuales = ordenadas.length === 1
-            ? ordenadas[0].kg_restantes // kg_restantes en DB ahora actúan como litros
+            ? ordenadas[0].kg_restantes
             : config.capacidad_litros;
-
         const fechaBase = ordenadas.length === 1 ? new Date(ordenadas[0].fecha) : new Date();
-
-        const diasTotalesDesdeLectura = Math.round(litrosActuales / tasaEstimada);
-        const fechaRecarga = new Date(fechaBase);
-        fechaRecarga.setDate(fechaRecarga.getDate() + diasTotalesDesdeLectura);
-
         const hoy = new Date();
-        const diasTranscurridos = ordenadas.length === 1 ? (hoy.getTime() - fechaBase.getTime()) / (1000 * 60 * 60 * 24) : 0;
-        const litrosActualesEstimados = Math.max(0, litrosActuales - (diasTranscurridos * tasaEstimada));
-        const diasRestantes = Math.round(litrosActualesEstimados / tasaEstimada);
+        const diasTranscurridos = ordenadas.length === 1
+            ? (hoy.getTime() - fechaBase.getTime()) / (1000 * 60 * 60 * 24)
+            : 0;
+        const litrosEstimadosHoy = Math.max(0, litrosActuales - diasTranscurridos * tasaEstimada);
+        const diasRestantes = Math.round(litrosEstimadosHoy / tasaEstimada);
+        const fechaRecarga = new Date();
+        fechaRecarga.setDate(fechaRecarga.getDate() + diasRestantes);
 
         const alertas: string[] = [];
-        if (fechaRecarga.getDay() === 0) {
-            alertas.push('📅 Tu gas se terminará en domingo. Te sugerimos recargar el viernes.');
-        }
-        if (factorEstacional > 1.1) {
-            alertas.push('❄️ Temporada de frío: tu consumo podría ser un poco más alto.');
-        }
+        const alertaDia = getAlertaDiaRecarga(fechaRecarga, diasRestantes);
+        if (alertaDia) alertas.push(alertaDia);
+        if (factorEstacional > 1.1) alertas.push(`❄️ Temporada de mayor consumo en tu zona (${zona}): prevé recargar un poco antes.`);
+
+        const costoEstimado = config.precio_litro_actual && litrosEstimadosHoy > 0
+            ? Math.round(litrosEstimadosHoy * config.precio_litro_actual)
+            : null;
 
         return {
             dias_restantes: ordenadas.length === 0 ? 0 : diasRestantes,
             fecha_recarga: ordenadas.length === 0 ? null : fechaRecarga,
             tasa_consumo_diaria: ordenadas.length === 0 ? 0 : Math.round(tasaEstimada * 100) / 100,
             confianza: 'perfil',
+            costo_estimado: costoEstimado,
             mensaje: ordenadas.length === 0
                 ? '¡Bienvenido! Registra tu primer nivel de gas para que la IA comience a aprender de tus hábitos.'
-                : 'Estimación basada en tu perfil. Registra más niveles para mejorar la precisión y no olvides la foto de tu tanque al recargar.',
-            alertas: ordenadas.length === 0 ? undefined : (alertas.length > 0 ? alertas : undefined)
+                : 'Estimación basada en tu perfil. Registra más niveles para mejorar la precisión.',
+            alertas: ordenadas.length === 0 ? undefined : (alertas.length > 0 ? alertas : undefined),
         };
     }
 
-    // ESCENARIO B: Regresión lineal con datos reales
-    // FILTRO AUTÓNOMO: Solo usar lecturas desde la última "recarga" detectada
-    // Se considera recarga si el nivel sube más de un 10%
+    // ESCENARIO B: Separar ciclo actual desde la última recarga
     let lecturasRecientes = [ordenadas[ordenadas.length - 1]];
     for (let i = ordenadas.length - 2; i >= 0; i--) {
         const actual = ordenadas[i + 1].nivel_porcentaje;
         const anterior = ordenadas[i].nivel_porcentaje;
-        if (actual > anterior + 10 || ordenadas[i + 1].es_carga) break; // Detectamos recarga
+        if (actual > anterior + 10 || ordenadas[i + 1].es_carga) break;
         lecturasRecientes.unshift(ordenadas[i]);
     }
 
-    // Si solo hay una lectura tras la recarga, volvemos a estimación por perfil
+    // Si solo hay 1 lectura en el ciclo actual, mezclar perfil + histórico
     if (lecturasRecientes.length < 2) {
-        let tasaEstimada = 0.8;
-        if (config.tipo_uso === 'negocio') {
-            const consumoTotalPorHora =
-                (config.num_quemadores_comerciales * 0.15) +
-                (config.num_freidoras * 0.40) +
-                (config.tiene_plancha ? 0.30 : 0) +
-                (config.tiene_horno ? 0.50 : 0);
-            const factorDias = config.dias_operacion_semana / 7;
-            tasaEstimada = (consumoTotalPorHora * config.horas_operacion_dia) * factorDias;
-            if (tasaEstimada <= 0) tasaEstimada = 2.0;
-        } else {
-            const horasCocina = (config.minutos_cocina_dia || 60) / 60;
-            const consumoCocina = horasCocina * 0.15 * config.veces_cocina_dia;
-            const factorBaño = config.tiempo_baño_min_promedio / 15;
-            const consumoBaño = config.num_personas_baño * (0.4 * factorBaño);
-            tasaEstimada = consumoCocina + consumoBaño;
+        const tasaPerfil = calcularTasaPerfil(config);
+        let tasaBase = tasaPerfil;
 
-            if (config.carga_habitual_litros > 0 && config.frecuencia_carga_dias > 0) {
-                tasaEstimada = config.carga_habitual_litros / config.frecuencia_carga_dias;
-            }
-            if (tasaEstimada <= 0) tasaEstimada = 0.8;
+        // Usar histórico si existe (70% histórico, 30% perfil)
+        if (tasaHistorica !== null) {
+            tasaBase = tasaHistorica * 0.7 + tasaPerfil * 0.3;
         }
-
-        const mesActual = new Date().getMonth();
-        const factorEstacional = FACTORES_ESTACIONALES[mesActual] || 1.0;
-        tasaEstimada *= factorEstacional;
+        const tasaEstimada = tasaBase * factorEstacional;
 
         const ultimaLectura = ordenadas[ordenadas.length - 1];
         const litrosActuales = ultimaLectura.kg_restantes;
-
-        const diasTotalesDesdeLectura = Math.round(litrosActuales / tasaEstimada);
-        const fechaRecarga = new Date(ultimaLectura.fecha);
-        fechaRecarga.setDate(fechaRecarga.getDate() + diasTotalesDesdeLectura);
-
         const hoy = new Date();
         const diasTranscurridos = (hoy.getTime() - new Date(ultimaLectura.fecha).getTime()) / (1000 * 60 * 60 * 24);
-        const litrosActualesEstimados = Math.max(0, litrosActuales - (diasTranscurridos * tasaEstimada));
-        const diasRestantes = Math.round(litrosActualesEstimados / tasaEstimada);
+        const litrosEstimadosHoy = Math.max(0, litrosActuales - diasTranscurridos * tasaEstimada);
+        const diasRestantes = Math.round(litrosEstimadosHoy / tasaEstimada);
+        const fechaRecarga = new Date();
+        fechaRecarga.setDate(fechaRecarga.getDate() + diasRestantes);
 
         const alertas: string[] = [];
-        if (fechaRecarga.getDay() === 0) {
-            alertas.push('📅 Tu gas se terminará en domingo. Te sugerimos recargar el viernes.');
-        }
-        if (factorEstacional > 1.1) {
-            alertas.push('❄️ Temporada de frío: tu consumo podría ser un poco más alto.');
-        }
+        const alertaDia = getAlertaDiaRecarga(fechaRecarga, diasRestantes);
+        if (alertaDia) alertas.push(alertaDia);
+        if (factorEstacional > 1.1) alertas.push(`❄️ Temporada de mayor consumo en tu zona (${zona}).`);
+
+        const costoEstimado = config.precio_litro_actual && litrosEstimadosHoy > 0
+            ? Math.round(litrosEstimadosHoy * config.precio_litro_actual)
+            : null;
 
         return {
             dias_restantes: diasRestantes,
             fecha_recarga: fechaRecarga,
             tasa_consumo_diaria: Math.round(tasaEstimada * 100) / 100,
-            confianza: 'perfil',
-            mensaje: 'Nueva recarga detectada. Estimando según tu perfil hasta tener más lecturas. (¡Toma foto a tu tanque para verificar!)',
-            alertas: alertas.length > 0 ? alertas : undefined
+            confianza: tasaHistorica !== null ? 'media' : 'perfil',
+            costo_estimado: costoEstimado,
+            mensaje: tasaHistorica !== null
+                ? 'Nueva recarga detectada. Usando promedio de tus ciclos anteriores para estimar.'
+                : 'Nueva recarga detectada. Estimando según tu perfil hasta tener más lecturas.',
+            alertas: alertas.length > 0 ? alertas : undefined,
         };
     }
 
-    // CALCULAR TASA ESTIMADA DEL PERFIL (Para comparar anomalías)
-    let tasaPerfil = 0.8;
-    if (config.tipo_uso === 'negocio') {
-        const cTotalHora = (config.num_quemadores_comerciales * 0.15) + (config.num_freidoras * 0.40) +
-            (config.tiene_plancha ? 0.30 : 0) + (config.tiene_horno ? 0.50 : 0);
-        tasaPerfil = Math.max(2.0, (cTotalHora * config.horas_operacion_dia) * (config.dias_operacion_semana / 7));
-    } else {
-        const hCocina = (config.minutos_cocina_dia || 60) / 60;
-        const cCocina = hCocina * 0.15 * config.veces_cocina_dia;
-        const cBaño = config.num_personas_baño * (0.4 * (config.tiempo_baño_min_promedio / 15));
-        tasaPerfil = Math.max(0.8, cCocina + cBaño);
-    }
+    // ESCENARIO C: Regresión lineal ponderada sobre el ciclo actual
+    const tasaPerfil = calcularTasaPerfil(config);
 
     const t0 = new Date(lecturasRecientes[0].fecha).getTime();
     const puntos: PuntoDato[] = lecturasRecientes.map((l) => ({
-        x: (new Date(l.fecha).getTime() - t0) / (1000 * 60 * 60 * 24), // días
+        x: (new Date(l.fecha).getTime() - t0) / (1000 * 60 * 60 * 24),
         y: l.kg_restantes,
     }));
 
     const n = puntos.length;
-    // REGRESIÓN LINEAL PONDERADA (Damos más peso a los datos más recientes)
-    // El punto más antiguo tendrá peso ~1, el más reciente peso mayor (ej. exponencial o lineal)
     let sumW = 0, sumWX = 0, sumWY = 0, sumWXY = 0, sumWX2 = 0;
-
-    // Encontramos el día máximo (xMax) para aplicar el mayor peso ahí
     const xMax = puntos[puntos.length - 1].x;
 
     for (const p of puntos) {
-        // Peso: 1 base + (qué tan cerca está del final). 
-        // Si p.x es 0 (más antiguo), peso = 1. Si p.x == xMax (hoy), peso = 2 o más.
         const w = xMax === 0 ? 1 : 1 + (p.x / xMax);
-
         sumW += w;
         sumWX += w * p.x;
         sumWY += w * p.y;
@@ -245,44 +334,41 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion, even
 
     const pendiente = (sumW * sumWXY - sumWX * sumWY) / denominador;
     const intercepto = (sumWY - pendiente * sumWX) / sumW;
-    const tasaConsumo = Math.abs(pendiente);
+    let tasaRegresion = Math.abs(pendiente);
+
+    // ── MEZCLA MULTI-CICLO ────────────────────────────────────────────────────
+    // Combinar regresión actual con histórico y perfil para mayor estabilidad
+    let tasaFinal = tasaRegresion;
+    if (tasaHistorica !== null) {
+        // Con histórico: 60% ciclo actual + 30% histórico + 10% perfil
+        tasaFinal = tasaRegresion * 0.60 + tasaHistorica * 0.30 + tasaPerfil * 0.10;
+    } else {
+        // Sin histórico: 80% regresión + 20% perfil
+        tasaFinal = tasaRegresion * 0.80 + tasaPerfil * 0.20;
+    }
+
+    // Aplicar factor estacional al resultado final
+    tasaFinal = tasaFinal * factorEstacional;
 
     // DETECCIÓN DE ANOMALÍAS / FUGAS
     let hayFuga = false;
-    // Si la tasa de consumo es inexplicablemente alta (por ejemplo, > 250% del perfil promedio)
-    if (tasaConsumo > tasaPerfil * 2.5 && tasaConsumo > 3) {
-        hayFuga = true;
+    if (tasaRegresion > tasaPerfil * 2.5 && tasaRegresion > 3) {
+        const hayEventoReciente = eventosExtra.some(e => {
+            const diff = new Date().getTime() - new Date(e.fecha).getTime();
+            return diff > 0 && diff < (1000 * 60 * 60 * 24 * 3);
+        });
+        if (!hayEventoReciente) hayFuga = true;
     }
 
     const ultimaLectura = ordenadas[ordenadas.length - 1];
-
-    // Verificar si hay eventos extras recientes (últimos 3 días) que justifiquen el consumo
-    const hoyMillis = new Date().getTime();
-    const hayEventoReciente = eventosExtra.some(e => {
-        const diff = hoyMillis - new Date(e.fecha).getTime();
-        return diff > 0 && diff < (1000 * 60 * 60 * 24 * 3); // 3 días
-    });
-
-    if (hayFuga && hayEventoReciente) {
-        hayFuga = false; // Ignoramos la alerta de fuga si el usuario registró un evento extra
-    }
-    const litrosActuales = ultimaLectura.kg_restantes;
-
-    // Estimate current level based on time elapsed to ensure days decrease visually
-    const fechaBase = new Date(ultimaLectura.fecha);
     const hoy = new Date();
-    const diasTranscurridos = (hoy.getTime() - fechaBase.getTime()) / (1000 * 60 * 60 * 24);
-    const litrosActualesEstimados = Math.max(0, litrosActuales - (diasTranscurridos * (tasaConsumo || 0.001)));
+    const diasTranscurridos = (hoy.getTime() - new Date(ultimaLectura.fecha).getTime()) / (1000 * 60 * 60 * 24);
+    const litrosActualesEstimados = Math.max(0, ultimaLectura.kg_restantes - diasTranscurridos * tasaFinal);
+    const diasRestantes = Math.round(litrosActualesEstimados / (tasaFinal || 0.001));
+    const fechaRecarga = new Date();
+    fechaRecarga.setDate(fechaRecarga.getDate() + diasRestantes);
 
-    // Total duration from the time of the valid reading
-    const diasTotalesDesdeLectura = Math.round(litrosActuales / (tasaConsumo || 0.001));
-
-    const fechaRecarga = new Date(ultimaLectura.fecha);
-    fechaRecarga.setDate(fechaRecarga.getDate() + diasTotalesDesdeLectura);
-
-    // Days remaining calculated from the estimated updated remaining liters today
-    const diasRestantes = Math.round(litrosActualesEstimados / (tasaConsumo || 0.001));
-
+    // R² para nivel de confianza
     const yMedia = puntos.reduce((s, p) => s + p.y, 0) / n;
     let ssTot = 0, ssRes = 0;
     for (const p of puntos) {
@@ -298,39 +384,41 @@ export function predecirConsumo(lecturas: Lectura[], config: Configuracion, even
     else if (n >= 3 || r2 >= 0.6) confianza = 'media';
     else confianza = 'baja';
 
+    // Alertas inteligentes
     const alertas: string[] = [];
+    const alertaDia = getAlertaDiaRecarga(fechaRecarga, diasRestantes);
+    if (alertaDia) alertas.push(alertaDia);
+    if (factorEstacional > 1.1) alertas.push(`❄️ Temporada de mayor consumo en tu zona: prevé recargar un poco antes de lo habitual.`);
+    if (diasRestantes <= 5 && diasRestantes > 0) alertas.push('🔴 ¡Gas crítico! Menos de 5 días restantes. Llama a tu gasero pronto.');
+    else if (diasRestantes <= config.alerta_dias) alertas.push(`⚠️ Gas bajo. Te quedan aproximadamente ${diasRestantes} días.`);
 
-    // 1. Alerta de Fin de Semana
-    if (fechaRecarga.getDay() === 0) {
-        alertas.push('📅 Tu gas se terminará en domingo. Te sugerimos recargar el viernes.');
+    // Costo estimado próxima recarga
+    const costoEstimado = config.precio_litro_actual && litrosActualesEstimados > 0
+        ? Math.round(litrosActualesEstimados * config.precio_litro_actual)
+        : null;
+
+    let mensajeFinal = `Tienes gas para aproximadamente ${diasRestantes} día${diasRestantes !== 1 ? 's' : ''}.`;
+    if (tasaHistorica !== null) {
+        mensajeFinal += ` (IA aprendiendo de ${Math.round(tasaHistorica * 10) / 10} L/día histórico)`;
     }
-
-    // 2. Alerta de Estacionalidad
-    const mesActual = new Date().getMonth();
-    const factorEstacional = FACTORES_ESTACIONALES[mesActual] || 1.0;
-    if (factorEstacional > 1.1) {
-        alertas.push('❄️ Temporada de frío detectada: tu consumo podría ser un poco más alto.');
-    }
-
-    let mensajeFinal = `Tienes gas para aproximadamente ${diasRestantes} días.`;
     if (hayFuga) {
-        mensajeFinal = `⚠️ ALERTA: Consumo inusualmente alto detectado (${Math.round(tasaConsumo)} L/día). Asegúrate de que no haya fugas en tu instalación.`;
+        mensajeFinal = `⚠️ ALERTA: Consumo inusualmente alto (${Math.round(tasaRegresion * 10) / 10} L/día). Revisa que no haya fugas en tu instalación.`;
         confianza = 'baja';
     }
 
     return {
         dias_restantes: diasRestantes,
         fecha_recarga: fechaRecarga,
-        tasa_consumo_diaria: Math.round(tasaConsumo * 100) / 100,
+        tasa_consumo_diaria: Math.round(tasaFinal * 100) / 100,
         confianza,
         mensaje: mensajeFinal,
-        alertas: alertas.length > 0 ? alertas : undefined
+        alertas: alertas.length > 0 ? alertas : undefined,
+        costo_estimado: costoEstimado,
     };
 }
 
 /**
- * Valida si una carga de gas fue completa comparando los litros reportados
- * contra el incremento medido en el tanque.
+ * Valida si una carga de gas fue completa comparando litros reportados vs incremento real.
  */
 export function validarCarga(lecturaActual: Lectura, lecturaAnterior: Lectura, capacidadTotal: number): {
     esCorrecta: boolean;
@@ -340,46 +428,29 @@ export function validarCarga(lecturaActual: Lectura, lecturaAnterior: Lectura, c
     if (!lecturaActual.es_carga || !lecturaActual.litros_cargados) {
         return { esCorrecta: true, diferenciaLitros: 0, mensaje: '' };
     }
-
-    // Litros reales que subió el tanque
     const incrementoLitros = lecturaActual.kg_restantes - lecturaAnterior.kg_restantes;
     const litrosEsperados = lecturaActual.litros_cargados;
-
-    // Margen de error aceptable (5% de la carga o 2 litros, lo que sea mayor)
     const margenError = Math.max(litrosEsperados * 0.05, 2);
     const diferencia = litrosEsperados - incrementoLitros;
-
     if (diferencia > margenError) {
         return {
             esCorrecta: false,
             diferenciaLitros: Math.round(diferencia),
-            mensaje: `⚠️ Posible carga incompleta detectada. El tanque subió ${incrementoLitros.toFixed(1)}L pero pagaste ${litrosEsperados}L. Diferencia: ~${Math.round(diferencia)}L.`
+            mensaje: `⚠️ Posible carga incompleta. El tanque subió ${incrementoLitros.toFixed(1)}L pero pagaste ${litrosEsperados}L. Diferencia: ~${Math.round(diferencia)}L.`
         };
     }
-
-    return {
-        esCorrecta: true,
-        diferenciaLitros: Math.round(diferencia),
-        mensaje: '✅ Carga verificada correctamente.'
-    };
+    return { esCorrecta: true, diferenciaLitros: Math.round(diferencia), mensaje: '✅ Carga verificada correctamente.' };
 }
 
 /**
- * Estima el nivel actual (litros) basado en la última lectura y el tiempo transcurrido.
- * Esto permite que el reloj "baje solo" poco a poco.
+ * Estima el nivel actual (litros) basado en la última lectura y tiempo transcurrido.
  */
 export function estimarNivelActual(ultimaLectura: Lectura, tasaDiaria: number): number {
     const fechaLectura = new Date(ultimaLectura.fecha).getTime();
     const ahora = new Date().getTime();
     const diasTranscurridos = (ahora - fechaLectura) / (1000 * 60 * 60 * 24);
-
-    const consumoEstimado = diasTranscurridos * tasaDiaria;
-    const nivelEstimado = Math.max(0, ultimaLectura.kg_restantes - consumoEstimado);
-
-    return nivelEstimado;
+    return Math.max(0, ultimaLectura.kg_restantes - diasTranscurridos * tasaDiaria);
 }
-
-// ── FUNCIÓN AUXILIAR: calcular litros desde porcentaje ──────
 
 export function porcentajeALitros(porcentaje: number, capacidad_litros: number): number {
     return Math.round((porcentaje / 100) * capacidad_litros * 100) / 100;
@@ -389,37 +460,19 @@ export function litrosAPorcentaje(litros: number, capacidad_litros: number): num
     return Math.round((litros / capacidad_litros) * 100);
 }
 
-// ── COLOR DEL GAUGE según nivel ─────────────────────────
-
 export function colorNivel(porcentaje: number): string {
-    if (porcentaje > 50) return '#4ADE80';  // verde
-    if (porcentaje > 20) return '#FACC15';  // amarillo
-    return '#F87171';                        // rojo
+    if (porcentaje > 50) return '#4ADE80';
+    if (porcentaje > 20) return '#FACC15';
+    return '#F87171';
 }
 
-function regresionLineal(datos: PuntoDato[]): { pendiente: number; intercepto: number } | null {
-    const n = datos.length;
-    if (n < 2) return null;
-    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-    for (const p of datos) {
-        sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x;
-    }
-    const denominador = n * sumX2 - sumX * sumX;
-    if (denominador === 0) return null;
-    const pendiente = (n * sumXY - sumX * sumY) / denominador;
-    const intercepto = (sumY - pendiente * sumX) / n;
-    return { pendiente, intercepto };
-}
-
-// Helpers para recargas
 export const calcularNivelCarga = (
     litrosCargados: number,
     capacidadTotal: number,
     nivelAnteriorPorcentaje: number
 ): number => {
     const porcentajeCargado = (litrosCargados / capacidadTotal) * 100;
-    const nuevoNivel = nivelAnteriorPorcentaje + porcentajeCargado;
-    return Math.min(Math.round(nuevoNivel), 100);
+    return Math.min(Math.round(nivelAnteriorPorcentaje + porcentajeCargado), 100);
 };
 
 export const dineroALitros = (monto: number, precioLitro: number): number => {

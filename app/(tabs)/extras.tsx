@@ -178,6 +178,7 @@ export default function ExtrasScreen() {
                 renderItem={renderEvento}
                 ListHeaderComponent={renderHeader}
                 contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
                         <Text style={styles.emptyText}>No has registrado consumos extras aún.</Text>
@@ -192,7 +193,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0D1B2A' },
     listContent: { padding: 20 },
     header: { marginBottom: 10 },
-    title: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', marginTop: 10 },
+    title: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', marginTop: 40 },
     subtitle: { fontSize: 13, color: '#4A6080', marginTop: 6, marginBottom: 24, lineHeight: 18 },
     card: {
         backgroundColor: '#132338',

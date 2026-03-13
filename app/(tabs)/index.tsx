@@ -10,24 +10,32 @@ import {
     obtenerUltimasLecturas,
     obtenerConfiguracion,
     obtenerEventosExtra,
+    obtenerFactoresUsuario,
     Lectura,
     Configuracion,
+    FactorUsuario,
 } from '../../services/database';
 import { predecirConsumo, Prediccion, estimarNivelActual, litrosAPorcentaje } from '../../services/ai';
 import { programarRecordatorio } from '../../services/notifications';
+import { addEventToCalendar } from '../../services/calendar';
+import { useAlert } from '../../services/alertContext';
 
 export default function HomeScreen() {
+    const { showAlert } = useAlert();
     const [config, setConfig] = useState<Configuracion | null>(null);
     const [lecturas, setLecturas] = useState<Lectura[]>([]);
     const [prediccion, setPrediccion] = useState<Prediccion | null>(null);
     const [nivelEstimado, setNivelEstimado] = useState<number>(0);
     const [refreshing, setRefreshing] = useState(false);
+    const [factoresUsuario, setFactoresUsuario] = useState<FactorUsuario[]>([]);
 
     const cargarDatos = useCallback(async () => {
         const cfg = await obtenerConfiguracion();
-        const lects = await obtenerUltimasLecturas(20);
+        const lects = await obtenerUltimasLecturas(60); // Más lecturas para el multi-ciclo
         const evts = await obtenerEventosExtra();
-        const pred = predecirConsumo(lects, cfg, evts);
+        const factores = await obtenerFactoresUsuario();
+        setFactoresUsuario(factores);
+        const pred = predecirConsumo(lects, cfg, evts, factores);
 
         let nivel = 0;
         if (lects.length > 0) {
@@ -62,6 +70,37 @@ export default function HomeScreen() {
         setRefreshing(false);
     };
 
+    const handleAgendarCalendario = async () => {
+        if (!prediccion || !prediccion.fecha_recarga) return;
+
+        const startDate = new Date(prediccion.fecha_recarga);
+        startDate.setHours(10, 0, 0); // 10 AM default
+        const endDate = new Date(startDate);
+        endDate.setHours(11, 0, 0);
+
+        const result = await addEventToCalendar({
+            title: '⛽ Cargar Gas LP',
+            startDate,
+            endDate,
+            description: `Recordatorio de Medidor Gas LP: Tu tanque está bajo (~${nivelEstimado}%). Según la IA, es momento de recargar.`,
+            location: 'Casa',
+        });
+
+        if (result.success) {
+            showAlert({
+                title: '📆 Agendado',
+                message: 'Se ha añadido el recordatorio a tu calendario para el día ' + startDate.toLocaleDateString(),
+                type: 'success',
+            });
+        } else {
+            showAlert({
+                title: 'Error',
+                message: result.error || 'No se pudo agendar el evento.',
+                type: 'error',
+            });
+        }
+    };
+
     const ultimaLectura = lecturas[0];
     const nivelActual = ultimaLectura?.nivel_porcentaje ?? 0;
     const fechaUltima = ultimaLectura
@@ -89,6 +128,7 @@ export default function HomeScreen() {
         <SafeAreaView style={styles.container}>
             <ScrollView
                 contentContainerStyle={styles.scroll}
+                showsVerticalScrollIndicator={false}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
             >
                 {/* Header */}
@@ -155,6 +195,15 @@ export default function HomeScreen() {
 
                         <Text style={styles.mensajeIA}>{prediccion.mensaje}</Text>
 
+                        {prediccion.costo_estimado != null && prediccion.costo_estimado > 0 && (
+                            <View style={styles.costoRow}>
+                                <MaterialCommunityIcons name="cash" size={16} color="#4ADE80" />
+                                <Text style={styles.costoText}>
+                                    Próxima recarga aprox.: <Text style={styles.costoValor}>${prediccion.costo_estimado.toLocaleString('es-MX')}</Text>
+                                </Text>
+                            </View>
+                        )}
+
                         {prediccion.alertas && prediccion.alertas.length > 0 && (
                             <View style={styles.alertasContainer}>
                                 {prediccion.alertas.map((alerta, idx) => (
@@ -187,6 +236,13 @@ export default function HomeScreen() {
                                     </View>
                                 )}
                             </View>
+                        )}
+
+                        {prediccion.fecha_recarga && (
+                            <TouchableOpacity style={styles.btnCalendario} onPress={handleAgendarCalendario}>
+                                <MaterialCommunityIcons name="calendar-plus" size={20} color="#6366F1" />
+                                <Text style={styles.btnCalendarioText}>Agendar en Calendario</Text>
+                            </TouchableOpacity>
                         )}
                     </View>
                 )}
@@ -289,6 +345,26 @@ const styles = StyleSheet.create({
     stat: { alignItems: 'center' },
     statValue: { fontSize: 22, fontWeight: '800', color: '#FF6B35' },
     statLabel: { fontSize: 11, color: '#4A6080', marginTop: 2 },
+    costoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#4ADE8015', borderRadius: 8, padding: 8, marginTop: 4, marginBottom: 8 },
+    costoText: { fontSize: 13, color: '#94A3B8', flex: 1 },
+    costoValor: { color: '#4ADE80', fontWeight: '800' },
+    btnCalendario: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#6366F115',
+        borderWidth: 1,
+        borderColor: '#6366F140',
+        borderRadius: 10,
+        paddingVertical: 10,
+        marginTop: 15,
+    },
+    btnCalendarioText: {
+        color: '#6366F1',
+        fontSize: 14,
+        fontWeight: '700',
+    },
     btnRegistrar: {
         backgroundColor: '#FF6B35',
         borderRadius: 14,

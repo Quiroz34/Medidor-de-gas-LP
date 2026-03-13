@@ -105,6 +105,29 @@ export default function RegistroModal() {
 
             await insertarLectura(nuevaLectura);
 
+            // 🧠 APRENDIZAJE IA: Si es una carga, actualizamos el factor del mes anterior
+            if (esCarga && lastLectura) {
+                const fechaFin = new Date(nuevaLectura.fecha);
+                const fechaInicio = new Date(lastLectura.fecha);
+                const diffDias = (fechaFin.getTime() - fechaInicio.getTime()) / (1000 * 60 * 60 * 24);
+                
+                if (diffDias >= 1) { // Solo si pasó al menos un día
+                    const consumoReal = lastLectura.kg_restantes - (nuevaLectura.kg_restantes - lts);
+                    const tasaReal = consumoReal / diffDias;
+                    
+                    if (tasaReal > 0) {
+                        const tasaEsperada = config ? (await import('../services/ai')).calcularTasaPerfil(config) : 1;
+                        const factorObservado = tasaReal / (tasaEsperada || 1);
+                        
+                        // Solo actualizar si el factor es razonable (evitar errores de captura)
+                        if (factorObservado > 0.2 && factorObservado < 5) {
+                            const { actualizarFactorUsuario } = await import('../services/database');
+                            await actualizarFactorUsuario(fechaInicio.getMonth(), factorObservado);
+                        }
+                    }
+                }
+            }
+
             if (esCarga && lastLectura) {
                 const validacion = validarCarga(nuevaLectura, lastLectura, config.capacidad_litros);
                 if (!validacion.esCorrecta) {

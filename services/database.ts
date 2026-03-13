@@ -19,24 +19,35 @@ export interface EventoExtra {
     tipo: 'lavado' | 'visitas' | 'horno' | 'ducha' | 'fiesta' | 'frio' | 'mantenimiento' | 'otro';
 }
 
+export interface FactorUsuario {
+    mes: number;       // 0-11
+    factor_real: number;
+    num_muestras: number;
+}
+
 export interface Configuracion {
     capacidad_litros: number;
     num_personas: number;
     nombre_usuario: string;
     alerta_dias: number;
     onboarding_completo: boolean;
-    // Nuevos campos de hábitos (General)
+    // Historial de carga
     carga_habitual_litros: number;
     frecuencia_carga_dias: number;
     // Tipo de USO
-    tipo_uso: 'casa' | 'negocio'; // Nuevo campo base
+    tipo_uso: 'casa' | 'negocio';
     // Perfil Casa
     veces_cocina_dia: number;
-    minutos_cocina_dia: number; // Nuevo: tiempo total de uso estufa
+    minutos_cocina_dia: number;
     num_personas_baño: number;
     tiempo_baño_min_promedio: number;
     tiene_secadora: boolean;
     tiene_calefaccion: boolean;
+    // Boiler / calentador de agua (NUEVO)
+    tiene_boiler: boolean;
+    num_personas_boiler: number;
+    // Zona climática (NUEVO)
+    zona_climatica: 'norte' | 'centro' | 'sur';
     // Perfil Negocio/Restaurante
     tipo_negocio: 'restaurante_grande' | 'restaurante_pequeno' | 'local_grande' | 'local_pequeno' | '';
     num_quemadores_comerciales: number;
@@ -45,7 +56,7 @@ export interface Configuracion {
     tiene_horno: boolean;
     horas_operacion_dia: number;
     dias_operacion_semana: number;
-    // Precio por defecto
+    // Precio
     precio_litro_actual?: number;
     gasero_nombre?: string;
     gasero_telefono?: string;
@@ -66,6 +77,9 @@ const DEFAULT_CONFIG: Configuracion = {
     tiempo_baño_min_promedio: 15,
     tiene_secadora: false,
     tiene_calefaccion: false,
+    tiene_boiler: true,
+    num_personas_boiler: 3,
+    zona_climatica: 'centro',
     tipo_negocio: '',
     num_quemadores_comerciales: 0,
     num_freidoras: 0,
@@ -103,7 +117,7 @@ export async function initDatabase(): Promise<void> {
 
     CREATE TABLE IF NOT EXISTS configuracion (
       id INTEGER PRIMARY KEY CHECK (id = 1),
-      capacidad_litros REAL NOT NULL DEFAULT 30,
+      capacidad_litros REAL NOT NULL DEFAULT 100,
       num_personas INTEGER NOT NULL DEFAULT 3,
       nombre_usuario TEXT NOT NULL DEFAULT '',
       alerta_dias INTEGER NOT NULL DEFAULT 3,
@@ -124,8 +138,12 @@ export async function initDatabase(): Promise<void> {
       dias_operacion_semana INTEGER DEFAULT 6,
       tiene_secadora INTEGER DEFAULT 0,
       tiene_calefaccion INTEGER DEFAULT 0,
+      tiene_boiler INTEGER DEFAULT 1,
+      num_personas_boiler INTEGER DEFAULT 3,
+      zona_climatica TEXT DEFAULT 'centro',
       gasero_nombre TEXT DEFAULT '',
-      gasero_telefono TEXT DEFAULT ''
+      gasero_telefono TEXT DEFAULT '',
+      precio_litro_actual REAL
     );
 
     CREATE TABLE IF NOT EXISTS eventos_extra (
@@ -135,10 +153,17 @@ export async function initDatabase(): Promise<void> {
       tipo TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS factores_usuario (
+      mes INTEGER PRIMARY KEY,
+      factor_real REAL NOT NULL DEFAULT 1.0,
+      num_muestras INTEGER NOT NULL DEFAULT 0
+    );
+
     INSERT OR IGNORE INTO configuracion (id, capacidad_litros, num_personas, nombre_usuario, alerta_dias, onboarding_completo)
-    VALUES (1, 30, 3, '', 3, 0);
+    VALUES (1, 100, 3, '', 3, 0);
   `);
 
+    // Migraciones para campos nuevos en tabla existente
     const columns = [
         'carga_habitual_litros REAL DEFAULT 0',
         'frecuencia_carga_dias INTEGER DEFAULT 30',
@@ -158,12 +183,14 @@ export async function initDatabase(): Promise<void> {
         'tiene_calefaccion INTEGER DEFAULT 0',
         'gasero_nombre TEXT DEFAULT ""',
         'gasero_telefono TEXT DEFAULT ""',
-        'precio_litro_actual REAL'
+        'precio_litro_actual REAL',
+        'tiene_boiler INTEGER DEFAULT 1',
+        'num_personas_boiler INTEGER DEFAULT 3',
+        'zona_climatica TEXT DEFAULT "centro"',
     ];
 
     for (const col of columns) {
         try {
-            const colName = col.split(' ')[0];
             await database.execAsync(`ALTER TABLE configuracion ADD COLUMN ${col}`);
         } catch (e) {
             // Ignorar si la columna ya existe
@@ -253,6 +280,9 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         tiempo_baño_min_promedio: number;
         tiene_secadora: number;
         tiene_calefaccion: number;
+        tiene_boiler: number;
+        num_personas_boiler: number;
+        zona_climatica: string;
         gasero_nombre: string;
         gasero_telefono: string;
         tipo_negocio: string;
@@ -262,6 +292,7 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         tiene_horno: number;
         horas_operacion_dia: number;
         dias_operacion_semana: number;
+        precio_litro_actual: number | null;
     }>(`SELECT * FROM configuracion WHERE id = 1`);
 
     if (!row) return DEFAULT_CONFIG;
@@ -271,7 +302,7 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         num_personas: row.num_personas,
         nombre_usuario: row.nombre_usuario,
         alerta_dias: row.alerta_dias,
-        onboarding_completo: row.onboarding_completo === 1,
+        onboarding_completo: !!row.onboarding_completo,
         carga_habitual_litros: row.carga_habitual_litros || 0,
         frecuencia_carga_dias: row.frecuencia_carga_dias || 30,
         tipo_uso: (row.tipo_uso as 'casa' | 'negocio') || 'casa',
@@ -279,17 +310,21 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         minutos_cocina_dia: row.minutos_cocina_dia || 60,
         num_personas_baño: row.num_personas_baño || 0,
         tiempo_baño_min_promedio: row.tiempo_baño_min_promedio || 0,
-        tiene_secadora: row.tiene_secadora === 1,
-        tiene_calefaccion: row.tiene_calefaccion === 1,
-        tipo_negocio: (row.tipo_negocio as 'restaurante_grande' | 'restaurante_pequeno' | 'local_grande' | 'local_pequeno' | '') || '',
+        tiene_secadora: !!row.tiene_secadora,
+        tiene_calefaccion: !!row.tiene_calefaccion,
+        tiene_boiler: row.tiene_boiler === null || row.tiene_boiler === undefined ? true : !!row.tiene_boiler,
+        num_personas_boiler: row.num_personas_boiler || 3,
+        zona_climatica: (row.zona_climatica as 'norte' | 'centro' | 'sur') || 'centro',
+        tipo_negocio: (row.tipo_negocio as any) || '',
         num_quemadores_comerciales: row.num_quemadores_comerciales || 0,
         num_freidoras: row.num_freidoras || 0,
-        tiene_plancha: row.tiene_plancha === 1,
-        tiene_horno: row.tiene_horno === 1,
+        tiene_plancha: !!row.tiene_plancha,
+        tiene_horno: !!row.tiene_horno,
         horas_operacion_dia: row.horas_operacion_dia || 0,
         dias_operacion_semana: row.dias_operacion_semana || 6,
         gasero_nombre: row.gasero_nombre || '',
         gasero_telefono: row.gasero_telefono || '',
+        precio_litro_actual: row.precio_litro_actual ?? undefined,
     };
 }
 
@@ -314,6 +349,9 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
       tiempo_baño_min_promedio = ?,
       tiene_secadora = ?,
       tiene_calefaccion = ?,
+      tiene_boiler = ?,
+      num_personas_boiler = ?,
+      zona_climatica = ?,
       gasero_nombre = ?,
       gasero_telefono = ?,
       tipo_negocio = ?,
@@ -322,7 +360,8 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
       tiene_plancha = ?,
       tiene_horno = ?,
       horas_operacion_dia = ?,
-      dias_operacion_semana = ?
+      dias_operacion_semana = ?,
+      precio_litro_actual = ?
     WHERE id = 1`,
         merged.capacidad_litros,
         merged.num_personas,
@@ -338,6 +377,9 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
         merged.tiempo_baño_min_promedio,
         merged.tiene_secadora ? 1 : 0,
         merged.tiene_calefaccion ? 1 : 0,
+        merged.tiene_boiler ? 1 : 0,
+        merged.num_personas_boiler,
+        merged.zona_climatica,
         merged.gasero_nombre || null,
         merged.gasero_telefono || null,
         merged.tipo_negocio,
@@ -346,7 +388,8 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
         merged.tiene_plancha ? 1 : 0,
         merged.tiene_horno ? 1 : 0,
         merged.horas_operacion_dia,
-        merged.dias_operacion_semana
+        merged.dias_operacion_semana,
+        merged.precio_litro_actual ?? null,
     );
 }
 
@@ -372,4 +415,32 @@ export async function obtenerEventosExtra(): Promise<EventoExtra[]> {
 export async function eliminarEventoExtra(id: number): Promise<void> {
     const database = await getDb();
     await database.runAsync(`DELETE FROM eventos_extra WHERE id = ?`, id);
+}
+
+// ── FACTORES DE USUARIO (aprendizaje estacional personalizado) ───
+
+export async function obtenerFactoresUsuario(): Promise<FactorUsuario[]> {
+    const database = await getDb();
+    return database.getAllAsync<FactorUsuario>(`SELECT * FROM factores_usuario`);
+}
+
+export async function actualizarFactorUsuario(mes: number, factorObservado: number): Promise<void> {
+    const database = await getDb();
+    const existing = await database.getFirstAsync<FactorUsuario>(
+        `SELECT * FROM factores_usuario WHERE mes = ?`, mes
+    );
+    if (existing) {
+        // Promedio ponderado: el nuevo factor tiene peso 1, los anteriores n
+        const n = existing.num_muestras;
+        const nuevoFactor = (existing.factor_real * n + factorObservado) / (n + 1);
+        await database.runAsync(
+            `UPDATE factores_usuario SET factor_real = ?, num_muestras = ? WHERE mes = ?`,
+            [Math.round(nuevoFactor * 1000) / 1000, n + 1, mes]
+        );
+    } else {
+        await database.runAsync(
+            `INSERT INTO factores_usuario (mes, factor_real, num_muestras) VALUES (?, ?, 1)`,
+            [mes, Math.round(factorObservado * 1000) / 1000]
+        );
+    }
 }

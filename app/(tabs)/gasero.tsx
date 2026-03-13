@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, StyleSheet, FlatList,
-    TouchableOpacity, TextInput, Alert,
+    TouchableOpacity, TextInput,
     ActivityIndicator, SafeAreaView, Linking, Platform,
+    PermissionsAndroid,
 } from 'react-native';
-// @ts-ignore
-import * as Contacts from 'expo-contacts';
+import Contacts from 'react-native-contacts';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { obtenerConfiguracion, actualizarConfiguracion, Configuracion } from '../../services/database';
 
@@ -72,31 +72,36 @@ export default function GaseroScreen() {
     };
 
     const handleSelectContact = async () => {
-        if (!Contacts || !Contacts.requestPermissionsAsync) {
-            showAlert({
-                title: 'Módulo no disponible',
-                message: 'El acceso a contactos no está disponible en este entorno. ¿Deseas registrarlo manualmente?',
-                type: 'warning',
-                buttons: [
-                    { text: 'Cancelar', style: 'cancel' },
-                    { text: 'Registrar Manual', onPress: registrarManualmente }
-                ]
-            });
-            return;
-        }
-
         setLoading(true);
         try {
-            const { status, canAskAgain } = await Contacts.requestPermissionsAsync();
-            
-            if (status === 'granted') {
-                const { data } = await Contacts.getContactsAsync({
-                    fields: [Contacts.Fields.PhoneNumbers],
-                });
+            let granted = false;
 
+            if (Platform.OS === 'android') {
+                const result = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
+                    {
+                        title: 'Permiso de Contactos',
+                        message: 'La app necesita acceder a tus contactos para seleccionar a tu gasero.',
+                        buttonPositive: 'Permitir',
+                        buttonNegative: 'Cancelar',
+                    },
+                );
+                granted = result === PermissionsAndroid.RESULTS.GRANTED;
+            } else {
+                const result = await Contacts.requestPermission();
+                granted = result === 'authorized';
+            }
+
+            if (granted) {
+                const data = await Contacts.getAll();
                 if (data && data.length > 0) {
-                    setContacts(data as any);
-                    setFilteredContacts(data as any);
+                    const mapped: ContactoMinimal[] = data.map((c: any) => ({
+                        id: c.recordID || c.id,
+                        name: `${c.givenName || ''} ${c.familyName || ''}`.trim() || c.displayName || 'Sin nombre',
+                        phoneNumbers: (c.phoneNumbers || []).map((p: any) => ({ number: p.number })),
+                    }));
+                    setContacts(mapped);
+                    setFilteredContacts(mapped);
                     setShowPicker(true);
                 } else {
                     showAlert({
@@ -105,28 +110,20 @@ export default function GaseroScreen() {
                         type: 'info',
                         buttons: [
                             { text: 'Cerrar', style: 'cancel' },
-                            { text: 'Registrar Manual', onPress: registrarManualmente }
-                        ]
+                            { text: 'Registrar Manual', onPress: registrarManualmente },
+                        ],
                     });
                 }
             } else {
-                const buttons: any[] = [
-                    { text: 'Entendido', style: 'cancel' },
-                    { text: 'Registrar Manual', onPress: registrarManualmente }
-                ];
-
-                if (!canAskAgain && Platform.OS !== 'web') {
-                    buttons.push({
-                        text: 'Ir a Ajustes',
-                        onPress: () => Linking.openSettings()
-                    });
-                }
-
                 showAlert({
                     title: 'Permiso denegado',
-                    message: 'Necesitamos acceso a tus contactos para facilitar el registro. Puedes dar el permiso en ajustes o registrarlo manualmente.',
+                    message: 'Necesitamos acceso a tus contactos. Puedes ir a Ajustes o registrar manualmente.',
                     type: 'warning',
-                    buttons
+                    buttons: [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Registrar Manual', onPress: registrarManualmente },
+                        { text: 'Ir a Ajustes', onPress: () => Linking.openSettings() },
+                    ],
                 });
             }
         } catch (error) {
@@ -136,8 +133,8 @@ export default function GaseroScreen() {
                 type: 'error',
                 buttons: [
                     { text: 'Cancelar', style: 'cancel' },
-                    { text: 'Registrar Manual', onPress: registrarManualmente }
-                ]
+                    { text: 'Registrar Manual', onPress: registrarManualmente },
+                ],
             });
         }
         setLoading(false);
@@ -308,7 +305,7 @@ export default function GaseroScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0D1B2A' },
     content: { padding: 20 },
-    title: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', marginTop: 10 },
+    title: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', marginTop: 40 },
     subtitle: { fontSize: 13, color: '#4A6080', marginTop: 6, marginBottom: 24 },
     emptyCard: {
         backgroundColor: '#132338',

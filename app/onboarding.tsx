@@ -32,6 +32,10 @@ export default function OnboardingScreen() {
     const [tiempoBaño, setTiempoBaño] = useState('15');
     const [tieneSecadora, setTieneSecadora] = useState(false);
     const [tieneCalefaccion, setTieneCalefaccion] = useState(false);
+    const [tieneBoiler, setTieneBoiler] = useState(true);
+    const [personasBoiler, setPersonasBoiler] = useState('3');
+    // Zona climática
+    const [zonaClimatica, setZonaClimatica] = useState<'norte' | 'centro' | 'sur'>('centro');
 
     // Campos Negocio
     const [tipoNegocio, setTipoNegocio] = useState('');
@@ -110,6 +114,9 @@ export default function OnboardingScreen() {
             tiene_calefaccion: tieneCalefaccion,
             horas_operacion_dia: hOperacion,
             dias_operacion_semana: dOperacion,
+            tiene_boiler: tieneBoiler,
+            num_personas_boiler: parseInt(personasBoiler, 10) || 3,
+            zona_climatica: zonaClimatica,
         });
         router.replace('/(tabs)');
     };
@@ -280,12 +287,6 @@ export default function OnboardingScreen() {
                             <Text style={styles.label}>¿Cuántos minutos en total cocinan al día?</Text>
                             <TextInput style={styles.input} keyboardType="numeric" value={minutosCocina} onChangeText={setMinutosCocina} placeholder="Ej. 60" placeholderTextColor="#4A6080" />
 
-                            <Text style={styles.label}>¿Cuántos se bañan a diario con agua caliente?</Text>
-                            <TextInput style={styles.input} keyboardType="numeric" value={personasBaño} onChangeText={setPersonasBaño} placeholder="Ej. 3" placeholderTextColor="#4A6080" />
-
-                            <Text style={styles.label}>Tiempo promedio de baño (minutos)</Text>
-                            <TextInput style={styles.input} keyboardType="numeric" value={tiempoBaño} onChangeText={setTiempoBaño} placeholder="Ej. 15" placeholderTextColor="#4A6080" />
-
                             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
                                 <TouchableOpacity
                                     style={[styles.optionBtn, tieneSecadora && styles.optionBtnActive, { flex: 1 }]}
@@ -303,6 +304,53 @@ export default function OnboardingScreen() {
                                         {tieneCalefaccion ? '✓ Calefacción' : '+ Calefacción'}
                                     </Text>
                                 </TouchableOpacity>
+                            </View>
+
+                            {/* Boiler / Calentador de agua */}
+                            <Text style={styles.label}>¿Tienes calentador de agua (boiler) a gas?</Text>
+                            <View style={{ flexDirection: 'row', gap: 10 }}>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, tieneBoiler && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setTieneBoiler(true)}
+                                >
+                                    <Text style={[styles.optionText, tieneBoiler && styles.optionTextActive, { textAlign: 'center' }]}>Sí</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.optionBtn, !tieneBoiler && styles.optionBtnActive, { flex: 1 }]}
+                                    onPress={() => setTieneBoiler(false)}
+                                >
+                                    <Text style={[styles.optionText, !tieneBoiler && styles.optionTextActive, { textAlign: 'center' }]}>No</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {tieneBoiler && (
+                                <>
+                                    <Text style={styles.label}>¿Cuántos se bañan a diario con agua caliente?</Text>
+                                    <TextInput style={styles.input} keyboardType="numeric" value={personasBaño} onChangeText={setPersonasBaño} placeholder="Ej. 3" placeholderTextColor="#4A6080" />
+
+                                    <Text style={styles.label}>Tiempo promedio de baño (minutos)</Text>
+                                    <TextInput style={styles.input} keyboardType="numeric" value={tiempoBaño} onChangeText={setTiempoBaño} placeholder="Ej. 15" placeholderTextColor="#4A6080" />
+
+                                    <Text style={styles.label}>¿Cuántas personas usan el boiler?</Text>
+                                    <TextInput style={styles.input} keyboardType="numeric" value={personasBoiler} onChangeText={setPersonasBoiler} placeholder="Ej. 3" placeholderTextColor="#4A6080" />
+                                </>
+                            )}
+
+                            {/* Zona climática */}
+                            <Text style={styles.label}>¿Cómo es el clima en tu ciudad?</Text>
+                            <Text style={[styles.featureDesc, { marginBottom: 8 }]}>Esto ajusta la predicción según el clima de tu zona.</Text>
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                                {([['norte', '❄️ Norte', 'Monterrey, Chihuahua...'], ['centro', '🌤️ Centro', 'CDMX, Guadalajara...'], ['sur', '☀️ Sur', 'Cancún, Mérida...']] as const).map(([val, label, desc]) => (
+                                    <TouchableOpacity
+                                        key={val}
+                                        style={[styles.optionBtn, zonaClimatica === val && styles.optionBtnActive, { flex: 1, alignItems: 'center', paddingVertical: 12 }]}
+                                        onPress={() => setZonaClimatica(val)}
+                                    >
+                                        <Text style={[styles.optionText, zonaClimatica === val && styles.optionTextActive, { textAlign: 'center', fontSize: 16 }]}>{label.split(' ')[0]}</Text>
+                                        <Text style={[styles.optionText, zonaClimatica === val && styles.optionTextActive, { textAlign: 'center' }]}>{label.split(' ')[1]}</Text>
+                                        <Text style={{ fontSize: 9, color: '#4A6080', textAlign: 'center', marginTop: 2 }}>{desc}</Text>
+                                    </TouchableOpacity>
+                                ))}
                             </View>
 
                             <View style={styles.navigationBtns}>
