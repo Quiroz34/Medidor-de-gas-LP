@@ -237,6 +237,9 @@ export default function HomeScreen() {
                                 <Text style={styles.costoText}>
                                     Próxima recarga aprox.: <Text style={styles.costoValor}>${prediccion.costo_estimado.toLocaleString('es-MX')}</Text>
                                 </Text>
+                                {config?.precio_litro_actual != null && (
+                                    <Text style={styles.precioLitro}>${config.precio_litro_actual.toFixed(2)}/L</Text>
+                                )}
                             </View>
                         )}
 
@@ -384,6 +387,7 @@ const styles = StyleSheet.create({
     costoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#4ADE8015', borderRadius: 8, padding: 8, marginTop: 4, marginBottom: 8 },
     costoText: { fontSize: 13, color: '#94A3B8', flex: 1 },
     costoValor: { color: '#4ADE80', fontWeight: '800' },
+    precioLitro: { fontSize: 12, color: '#4ADE80', fontWeight: '700', opacity: 0.7 },
     btnCalendario: {
         flexDirection: 'row',
         alignItems: 'center',

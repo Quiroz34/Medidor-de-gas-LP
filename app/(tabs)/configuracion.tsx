@@ -17,6 +17,7 @@ import { cancelarRecordatorios, solicitarPermisos } from '../../services/notific
 import * as Notifications from 'expo-notifications';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 
 import { useAlert } from '../../services/alertContext';
 
@@ -58,6 +59,13 @@ export default function ConfiguracionScreen() {
     const [guardado, setGuardado] = useState(false);
     const [notificaciones, setNotificaciones] = useState(true);
 
+    const handleToggleNotificaciones = async (value: boolean) => {
+        setNotificaciones(value);
+        if (!value) {
+            await cancelarRecordatorios();
+        }
+    };
+
     useFocusEffect(
         useCallback(() => {
             obtenerConfiguracion().then(setConfig);
@@ -73,10 +81,18 @@ export default function ConfiguracionScreen() {
             });
             return;
         }
-        if (config.capacidad_litros <= 0 || isNaN(config.capacidad_litros)) {
-            showAlert({ 
-                title: 'Capacidad inválida', 
-                message: 'La capacidad del tanque debe ser mayor a 0 litros.',
+        if (config.capacidad_litros < 1 || isNaN(config.capacidad_litros)) {
+            showAlert({
+                title: 'Capacidad inválida',
+                message: 'La capacidad del tanque debe ser al menos 1 litro.',
+                type: 'error'
+            });
+            return;
+        }
+        if (config.capacidad_litros > 50000) {
+            showAlert({
+                title: 'Capacidad inválida',
+                message: 'La capacidad del tanque no puede superar 50,000 litros.',
                 type: 'error'
             });
             return;
@@ -136,7 +152,7 @@ export default function ConfiguracionScreen() {
         }
     };
 
-    const handleExportarCSV = async () => {
+    const handleExportarExcel = async () => {
         try {
             const lecturas = await obtenerLecturas();
             if (lecturas.length === 0) {
@@ -148,35 +164,42 @@ export default function ConfiguracionScreen() {
                 return;
             }
 
-            // Crear el contenido CSV de forma robusta
-            const header = 'ID,Fecha,Nivel(%),Litros Restantes,Es Carga,Litros Cargados,Monto($),Precio/L,Notas\n';
-            const rows = lecturas.map(l => {
-                const fecha = new Date(l.fecha).toLocaleString();
-                const esCargaText = l.es_carga ? 'SÍ' : 'NO';
-                const notasEscaped = (l.notas || '').replace(/"/g, '""');
-                return `${l.id},"${fecha}",${l.nivel_porcentaje},${l.kg_restantes},${esCargaText},${l.litros_cargados || ''},${l.monto_dinero || ''},${l.precio_litro || ''},"${notasEscaped}"`;
-            }).join('\n');
+            // Construir filas con tipos correctos para que Excel los reconozca
+            const filas = lecturas.map(l => ({
+                'ID': l.id,
+                'Fecha': new Date(l.fecha).toLocaleString('es-MX'),
+                'Nivel (%)': l.nivel_porcentaje,
+                'Litros Restantes': l.kg_restantes,
+                'Es Carga': l.es_carga ? 'SÍ' : 'NO',
+                'Litros Cargados': l.litros_cargados ?? '',
+                'Monto ($)': l.monto_dinero ?? '',
+                'Precio/L': l.precio_litro ?? '',
+                'Notas': l.notas ?? '',
+            }));
 
-            const csvContent = header + rows;
+            const ws = XLSX.utils.json_to_sheet(filas);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Historial Gas LP');
 
-            // Guardar archivo temporal en el directorio de cache de forma segura
+            // Generar binario en base64 (compatible con React Native)
+            const xlsxBase64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+
             const cacheDir = FileSystem.cacheDirectory;
-            if (!cacheDir) {
-                throw new Error('No se pudo acceder al directorio de cache.');
-            }
+            if (!cacheDir) throw new Error('No se pudo acceder al directorio de cache.');
 
-            const fileName = `historial_gaslp_${Date.now()}.csv`;
+            const fileName = `historial_gaslp_${Date.now()}.xlsx`;
             const fileUri = cacheDir + fileName;
-            
-            await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: 'utf8' as any });
 
-            // Compartir el archivo
+            await FileSystem.writeAsStringAsync(fileUri, xlsxBase64, {
+                encoding: FileSystem.EncodingType.Base64,
+            });
+
             const isSharingAvailable = await Sharing.isAvailableAsync();
             if (isSharingAvailable) {
                 await Sharing.shareAsync(fileUri, {
-                    mimeType: 'text/csv',
+                    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     dialogTitle: 'Exportar Historial de Gas',
-                    UTI: 'public.comma-separated-values-text'
+                    UTI: 'com.microsoft.excel.xlsx',
                 });
             } else {
                 showAlert({
@@ -186,10 +209,10 @@ export default function ConfiguracionScreen() {
                 });
             }
         } catch (error) {
-            console.error('Error al exportar CSV:', error);
+            console.error('Error al exportar Excel:', error);
             showAlert({
                 title: 'Error',
-                message: 'Ocurrió un error inesperado al generar el archivo CSV.',
+                message: 'Ocurrió un error inesperado al generar el archivo Excel.',
                 type: 'error'
             });
         }
@@ -302,7 +325,7 @@ export default function ConfiguracionScreen() {
 
                     <Text style={styles.label}>Capacidad total (Litros)</Text>
                     <View style={styles.optionsRow}>
-                        {['100', '120', '180', '300', '500', '1000', '2000', '5000'].map((v) => (
+                        {['100', '120', '180', '300', '500', '1000', '2000', '5000', '10000'].map((v) => (
                             <TouchableOpacity
                                 key={v}
                                 style={[styles.optionBtn, config.capacidad_litros === parseFloat(v) && styles.optionBtnActive]}
@@ -524,7 +547,7 @@ export default function ConfiguracionScreen() {
                         <Text style={styles.switchLabel}>Activar recordatorios</Text>
                         <Switch
                             value={notificaciones}
-                            onValueChange={setNotificaciones}
+                            onValueChange={handleToggleNotificaciones}
                             trackColor={{ true: '#FF6B35', false: '#1E3A5F' }}
                             thumbColor="#FFFFFF"
                         />
@@ -570,10 +593,10 @@ export default function ConfiguracionScreen() {
                         <MaterialCommunityIcons name="database-export" size={16} color="#4ADE80" />
                         <Text style={[styles.sectionTitle, { color: '#4ADE80' }]}>Datos y Respaldo</Text>
                     </View>
-                    <Text style={styles.description}>Exporta tu historial de lecturas a un archivo Excel/CSV compatible para tener tu propio respaldo local.</Text>
-                    <TouchableOpacity style={styles.btnExport} onPress={handleExportarCSV}>
-                        <MaterialCommunityIcons name="file-export" size={20} color="#4ADE80" />
-                        <Text style={styles.btnExportText}>Exportar Historial (CSV)</Text>
+                    <Text style={styles.description}>Exporta tu historial de lecturas a un archivo Excel (.xlsx) para tener tu propio respaldo local.</Text>
+                    <TouchableOpacity style={styles.btnExport} onPress={handleExportarExcel}>
+                        <MaterialCommunityIcons name="microsoft-excel" size={20} color="#4ADE80" />
+                        <Text style={styles.btnExportText}>Exportar Historial (Excel)</Text>
                     </TouchableOpacity>
                 </View>
 

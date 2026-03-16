@@ -65,6 +65,7 @@ export interface Configuracion {
     municipio: string;
     actualizar_precio_auto: boolean;
     precio_litro_actual?: number;
+    precio_ultima_actualizacion?: string; // ISO date string
 }
 
 const DEFAULT_CONFIG: Configuracion = {
@@ -94,6 +95,7 @@ const DEFAULT_CONFIG: Configuracion = {
     dias_operacion_semana: 6,
     gasero_telefono: '',
     precio_litro_actual: undefined,
+    precio_ultima_actualizacion: undefined,
     pais: 'México',
     estado: '',
     municipio: '',
@@ -202,6 +204,7 @@ export async function initDatabase(): Promise<void> {
         'estado TEXT DEFAULT ""',
         'municipio TEXT DEFAULT ""',
         'actualizar_precio_auto INTEGER DEFAULT 1',
+        'precio_ultima_actualizacion TEXT',
     ];
 
     for (const col of columns) {
@@ -312,6 +315,7 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         estado: string;
         municipio: string;
         actualizar_precio_auto: number;
+        precio_ultima_actualizacion: string | null;
     }>(`SELECT * FROM configuracion WHERE id = 1`);
 
     if (!row) return DEFAULT_CONFIG;
@@ -327,14 +331,14 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         tipo_uso: (row.tipo_uso as 'casa' | 'negocio') || 'casa',
         veces_cocina_dia: row.veces_cocina_dia || 2,
         minutos_cocina_dia: row.minutos_cocina_dia || 60,
-        num_personas_baño: row.num_personas_baño || 0,
-        tiempo_baño_min_promedio: row.tiempo_baño_min_promedio || 0,
+        num_personas_baño: row.num_personas_baño ?? 3,
+        tiempo_baño_min_promedio: row.tiempo_baño_min_promedio ?? 15,
         tiene_secadora: row.tiene_secadora === 1,
         tiene_calefaccion: row.tiene_calefaccion === 1,
         tiene_boiler: row.tiene_boiler === 1,
         num_personas_boiler: row.num_personas_boiler || 3,
         zona_climatica: (row.zona_climatica as 'norte' | 'centro' | 'sur') || 'centro',
-        tipo_negocio: (row.tipo_negocio as any) || '',
+        tipo_negocio: (row.tipo_negocio as Configuracion['tipo_negocio']) || '',
         num_quemadores_comerciales: row.num_quemadores_comerciales || 0,
         num_freidoras: row.num_freidoras || 0,
         tiene_plancha: row.tiene_plancha === 1,
@@ -344,6 +348,7 @@ export async function obtenerConfiguracion(): Promise<Configuracion> {
         gasero_nombre: row.gasero_nombre || '',
         gasero_telefono: row.gasero_telefono || '',
         precio_litro_actual: row.precio_litro_actual ?? undefined,
+        precio_ultima_actualizacion: row.precio_ultima_actualizacion ?? undefined,
         pais: row.pais || 'México',
         estado: row.estado || '',
         municipio: row.municipio || '',
@@ -385,6 +390,7 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
       horas_operacion_dia = ?,
       dias_operacion_semana = ?,
       precio_litro_actual = ?,
+      precio_ultima_actualizacion = ?,
       pais = ?,
       estado = ?,
       municipio = ?,
@@ -417,6 +423,7 @@ export async function actualizarConfiguracion(config: Partial<Configuracion>): P
         merged.horas_operacion_dia,
         merged.dias_operacion_semana,
         merged.precio_litro_actual ?? null,
+        merged.precio_ultima_actualizacion ?? null,
         merged.pais,
         merged.estado,
         merged.municipio,

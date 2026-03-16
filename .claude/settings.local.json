@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:datos.gob.mx)",
+      "WebFetch(domain:www.gob.mx)",
+      "WebFetch(domain:cre.gob.mx)",
+      "WebFetch(domain:repodatos.atdt.gob.mx)"
+    ]
+  }
+}

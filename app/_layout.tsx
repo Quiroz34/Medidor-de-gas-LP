@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { initDatabase, obtenerConfiguracion } from '@/services/database';
+import { verificarEstadoPermisos, solicitarPermisosTotales } from '@/services/permissions';
+import { syncGasPrice } from '@/services/priceService';
 
 import { AlertProvider } from '@/services/alertContext';
 import CustomAlert from '@/components/CustomAlert';
@@ -20,7 +22,16 @@ export default function RootLayout() {
                 if (!config.onboarding_completo) {
                     router.replace('/onboarding');
                 } else {
+                    // Usuario ya configurado: navegar a la app
                     router.replace('/(tabs)');
+                    // Verificar permisos faltantes en segundo plano
+                    const estado = await verificarEstadoPermisos();
+                    const faltanPermisos = !estado.notifications || !estado.contacts || !estado.calendar || !estado.location;
+                    if (faltanPermisos) {
+                        solicitarPermisosTotales().catch(() => {});
+                    }
+                    // Sincronizar precio del gas si han pasado más de 7 días
+                    syncGasPrice(config).catch(() => {});
                 }
             } catch (e) {
                 console.warn(e);

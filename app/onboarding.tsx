@@ -101,7 +101,7 @@ export default function OnboardingScreen() {
                 tiene_boiler: tieneBoiler,
                 num_personas_boiler: parseInt(personasBoiler, 10) || 3,
                 zona_climatica: zonaClimatica,
-                tipo_negocio: tipoNegocio as any,
+                tipo_negocio: tipoNegocio as Configuracion['tipo_negocio'],
                 num_quemadores_comerciales: parseInt(quemadores, 10) || 0,
                 num_freidoras: parseInt(freidoras, 10) || 0,
                 tiene_plancha: tienePlancha,
@@ -161,10 +161,10 @@ export default function OnboardingScreen() {
                     return;
                 }
             } else if (tipoUso === 'negocio') {
-                if (!tipoNegocio.trim() || !quemadores.trim() || !freidoras.trim() || !horasOperacion.trim() || !diasOperacion.trim()) {
-                    showAlert({ 
-                        title: 'Campos incompletos', 
-                        message: 'Por favor responde todas las preguntas sobre tu negocio.',
+                if (!tipoNegocio || !quemadores.trim() || !freidoras.trim() || !horasOperacion.trim() || !diasOperacion.trim()) {
+                    showAlert({
+                        title: 'Campos incompletos',
+                        message: 'Por favor selecciona el tamaño de tu negocio y completa todos los campos.',
                         type: 'warning'
                     });
                     return;
@@ -240,15 +240,20 @@ export default function OnboardingScreen() {
                                 </View>
                             </View>
 
-                            <TouchableOpacity 
-                                style={[styles.btnPrimary, pediendoPermisos && { opacity: 0.7 }]} 
-                                onPress={handleSolicitarPermisos}
-                                disabled={pediendoPermisos}
-                            >
-                                <Text style={styles.btnPrimaryText}>
-                                    {pediendoPermisos ? 'Habilitando...' : 'Habilitar Funciones →'}
-                                </Text>
-                            </TouchableOpacity>
+                            <View style={styles.navigationBtns}>
+                                <TouchableOpacity style={[styles.btnSecondary, { flex: 1 }]} onPress={prevStep} disabled={pediendoPermisos}>
+                                    <Text style={styles.btnSecondaryText}>Atrás</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.btnPrimary, { flex: 2, marginTop: 0, opacity: pediendoPermisos ? 0.7 : 1 }]}
+                                    onPress={handleSolicitarPermisos}
+                                    disabled={pediendoPermisos}
+                                >
+                                    <Text style={styles.btnPrimaryText}>
+                                        {pediendoPermisos ? 'Habilitando...' : 'Habilitar Funciones →'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     )}
 
@@ -260,7 +265,7 @@ export default function OnboardingScreen() {
 
                             <Text style={styles.label}>Capacidad del tanque (Litros)</Text>
                             <View style={styles.optionsRow}>
-                                {['100', '120', '180', '300', '500', '1000', '2000', '5000'].map((v) => (
+                                {['100', '120', '180', '300', '500', '1000', '2000', '5000', '10000'].map((v) => (
                                     <TouchableOpacity key={v} style={[styles.optionBtn, capacidad === v && styles.optionBtnActive]} onPress={() => setCapacidad(v)}>
                                         <Text style={[styles.optionText, capacidad === v && styles.optionTextActive]}>{v} L</Text>
                                     </TouchableOpacity>
@@ -431,8 +436,32 @@ export default function OnboardingScreen() {
                             <Text style={styles.cardTitle}>Paso 3: Equipos de Negocio</Text>
                             <Text style={styles.featureDesc}>Describe brevemente tu negocio y equipos.</Text>
 
-                            <Text style={styles.label}>Nombre o tipo de negocio</Text>
-                            <TextInput style={styles.input} value={tipoNegocio} onChangeText={setTipoNegocio} placeholder="Ej. Restaurante 'La Posada'" placeholderTextColor="#4A6080" />
+                            <Text style={styles.label}>¿Qué tamaño tiene tu negocio?</Text>
+                            <View style={{ gap: 8 }}>
+                                {([
+                                    ['restaurante_grande', '🍽️ Restaurante Grande', 'Mucho tráfico, cocina activa todo el día'],
+                                    ['restaurante_pequeno', '🥘 Restaurante Pequeño', 'Local familiar o de barrio'],
+                                    ['local_grande', '🏪 Local Grande', 'Varios equipos o puntos de venta'],
+                                    ['local_pequeno', '🛒 Local / Puesto Pequeño', 'Poco equipo, operación reducida'],
+                                ] as const).map(([val, label, desc]) => (
+                                    <TouchableOpacity
+                                        key={val}
+                                        style={[
+                                            styles.optionBtn,
+                                            tipoNegocio === val && styles.optionBtnActive,
+                                            { paddingVertical: 12, paddingHorizontal: 16 },
+                                        ]}
+                                        onPress={() => setTipoNegocio(val)}
+                                    >
+                                        <Text style={[styles.optionText, tipoNegocio === val && styles.optionTextActive, { fontWeight: '700' }]}>
+                                            {label}
+                                        </Text>
+                                        <Text style={{ fontSize: 11, color: tipoNegocio === val ? '#FFD0B5' : '#4A6080', marginTop: 2 }}>
+                                            {desc}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
 
                             <Text style={styles.label}>¿Cuántos quemadores comerciales/parrillas usas?</Text>
                             <TextInput style={styles.input} keyboardType="numeric" value={quemadores} onChangeText={setQuemadores} placeholder="Ej. 4" placeholderTextColor="#4A6080" />

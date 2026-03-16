@@ -123,8 +123,10 @@ function calcularTasaHistorica(todasLasLecturas: Lectura[]): number | null {
         const dias = (ultimaFecha - primeraFecha) / (1000 * 60 * 60 * 24);
         const litrosConsumidos = segmento[0].kg_restantes - segmento[segmento.length - 1].kg_restantes;
 
-        if (dias > 1 && litrosConsumidos > 0) {
-            tasasPorCiclo.push(litrosConsumidos / dias);
+        // Requerir al menos 3 días de span para que la tasa sea representativa
+        // y acotar a 30 L/día máximo para filtrar ciclos con datos corruptos
+        if (dias >= 3 && litrosConsumidos > 0) {
+            tasasPorCiclo.push(Math.min(30, litrosConsumidos / dias));
         }
     }
 
@@ -142,6 +144,15 @@ function calcularTasaHistorica(todasLasLecturas: Lectura[]): number | null {
     return sumaPesos > 0 ? sumaPonderada / sumaPesos : null;
 }
 
+// ── FACTORES BASE POR TIPO DE NEGOCIO ────────────────────────────────────────
+// Multiplica el consumo calculado por equipos según el tamaño/tipo del negocio
+const FACTORES_BASE_NEGOCIO: Record<string, number> = {
+    'restaurante_grande': 1.40,  // Mucho tráfico, cocina encendida todo el día
+    'restaurante_pequeno': 1.00, // Restaurante típico de barrio
+    'local_grande': 1.20,        // Local amplio con varios puntos de venta
+    'local_pequeno': 0.80,       // Puesto o local pequeño
+};
+
 // ── TASA DEL PERFIL DEL USUARIO ──────────────────────────────────────────────
 export function calcularTasaPerfil(config: Configuracion): number {
     if (config.tipo_uso === 'negocio') {
@@ -151,13 +162,17 @@ export function calcularTasaPerfil(config: Configuracion): number {
             (config.tiene_plancha ? 0.30 : 0) +
             (config.tiene_horno ? 0.50 : 0);
         const factorDias = config.dias_operacion_semana / 7;
-        const tasa = (consumoTotalPorHora * config.horas_operacion_dia) * factorDias;
+        // Aplicar factor base según tipo de negocio para diferenciar entre tamaños
+        const factorTipoBase = FACTORES_BASE_NEGOCIO[config.tipo_negocio || ''] ?? 1.0;
+        const tasa = (consumoTotalPorHora * config.horas_operacion_dia) * factorDias * factorTipoBase;
         return Math.max(2.0, tasa);
     }
 
-    // Casa
+    // Casa — escalar consumo de cocina por número de personas (base = 3 personas)
+    // Más personas en el hogar = más cocina, acotado entre 50% y 250% del base
+    const factorPersonas = Math.max(0.5, Math.min(2.5, (config.num_personas || 3) / 3));
     const horasCocina = (config.minutos_cocina_dia || 60) / 60;
-    const consumoCocina = horasCocina * 0.15 * (config.veces_cocina_dia || 2);
+    const consumoCocina = horasCocina * 0.15 * (config.veces_cocina_dia || 2) * factorPersonas;
 
     // Regadera + calentador de agua
     const factorBaño = (config.tiempo_baño_min_promedio || 15) / 15;
@@ -242,9 +257,9 @@ export function predecirConsumo(
             : null;
 
         return {
-            dias_restantes: ordenadas.length === 0 ? 0 : diasRestantes,
+            dias_restantes: ordenadas.length === 0 ? null : diasRestantes,
             fecha_recarga: ordenadas.length === 0 ? null : fechaRecarga,
-            tasa_consumo_diaria: ordenadas.length === 0 ? 0 : Math.round(tasaEstimada * 100) / 100,
+            tasa_consumo_diaria: ordenadas.length === 0 ? null : Math.round(tasaEstimada * 100) / 100,
             confianza: 'perfil',
             costo_estimado: costoEstimado,
             mensaje: ordenadas.length === 0
@@ -315,6 +330,48 @@ export function predecirConsumo(
     }));
 
     const n = puntos.length;
+    const spanDias = puntos[puntos.length - 1].x; // días entre primera y última lectura
+
+    // ── PROTECCIÓN CONTRA REGRESIÓN INESTABLE ────────────────────────────────
+    // Si las lecturas del ciclo actual están muy cerca en el tiempo (< 2 días)
+    // y son pocas (< 4), la pendiente de la regresión será ruidosa y poco confiable.
+    // En ese caso, caer de nuevo en mezcla histórico + perfil (igual que Escenario B).
+    if (n < 4 && spanDias < 2) {
+        const tasaBase = tasaHistorica !== null
+            ? tasaHistorica * 0.7 + tasaPerfil * 0.3
+            : tasaPerfil;
+        const tasaEstimada = tasaBase * factorEstacional;
+
+        const ultimaLecturaB = ordenadas[ordenadas.length - 1];
+        const hoyB = new Date();
+        const diasTranscurridosB = (hoyB.getTime() - new Date(ultimaLecturaB.fecha).getTime()) / (1000 * 60 * 60 * 24);
+        const litrosEstimadosHoyB = Math.max(0, ultimaLecturaB.kg_restantes - diasTranscurridosB * tasaEstimada);
+        const diasRestantesB = Math.round(litrosEstimadosHoyB / (tasaEstimada || 0.001));
+        const fechaRecargaB = new Date();
+        fechaRecargaB.setDate(fechaRecargaB.getDate() + diasRestantesB);
+
+        const alertasB: string[] = [];
+        const alertaDiaB = getAlertaDiaRecarga(fechaRecargaB, diasRestantesB);
+        if (alertaDiaB) alertasB.push(alertaDiaB);
+        if (factorEstacional > 1.1) alertasB.push(`❄️ Temporada de mayor consumo en tu zona (${zona}).`);
+        if (diasRestantesB <= 5 && diasRestantesB > 0) alertasB.push('🔴 ¡Gas crítico! Menos de 5 días restantes. Llama a tu gasero pronto.');
+        else if (diasRestantesB <= config.alerta_dias) alertasB.push(`⚠️ Gas bajo. Te quedan aproximadamente ${diasRestantesB} días.`);
+
+        const costoEstimadoB = config.precio_litro_actual && litrosEstimadosHoyB > 0
+            ? Math.round(litrosEstimadosHoyB * config.precio_litro_actual)
+            : null;
+
+        return {
+            dias_restantes: diasRestantesB,
+            fecha_recarga: fechaRecargaB,
+            tasa_consumo_diaria: Math.round(tasaEstimada * 100) / 100,
+            confianza: tasaHistorica !== null ? 'media' : 'perfil',
+            costo_estimado: costoEstimadoB,
+            mensaje: 'Lecturas muy recientes. Estimando con tu historial hasta acumular más datos.',
+            alertas: alertasB.length > 0 ? alertasB : undefined,
+        };
+    }
+
     let sumW = 0, sumWX = 0, sumWY = 0, sumWXY = 0, sumWX2 = 0;
     const xMax = puntos[puntos.length - 1].x;
 
@@ -330,12 +387,19 @@ export function predecirConsumo(
     const denominador = sumW * sumWX2 - sumWX * sumWX;
     if (denominador === 0) return {
         dias_restantes: null, fecha_recarga: null, tasa_consumo_diaria: null,
-        confianza: 'insuficiente', mensaje: 'Datos insuficientes para calcular consumo.'
+        confianza: 'insuficiente', mensaje: 'Datos insuficientes para calcular consumo.',
+        costo_estimado: null, alertas: undefined,
     };
 
     const pendiente = (sumW * sumWXY - sumWX * sumWY) / denominador;
     const intercepto = (sumWY - pendiente * sumWX) / sumW;
     let tasaRegresion = Math.abs(pendiente);
+
+    // Acotar la tasa entre 20% y 400% del perfil para evitar valores absurdos
+    // por lecturas tomadas con poca diferencia de tiempo o anomalías puntuales.
+    const tasaMinR = Math.max(0.3, tasaPerfil * 0.20);
+    const tasaMaxR = tasaPerfil * 4.0;
+    tasaRegresion = Math.max(tasaMinR, Math.min(tasaMaxR, tasaRegresion));
 
     // ── MEZCLA MULTI-CICLO ────────────────────────────────────────────────────
     // Combinar regresión actual con histórico y perfil para mayor estabilidad

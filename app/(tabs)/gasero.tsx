@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, StyleSheet, FlatList,
     TouchableOpacity, TextInput,
-    ActivityIndicator, SafeAreaView, Linking, Platform,
-    PermissionsAndroid,
+    ActivityIndicator, SafeAreaView, Linking,
 } from 'react-native';
 import Contacts from 'react-native-contacts';
+import * as ExpoContacts from 'expo-contacts';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { obtenerConfiguracion, actualizarConfiguracion, Configuracion } from '../../services/database';
 
@@ -74,23 +74,8 @@ export default function GaseroScreen() {
     const handleSelectContact = async () => {
         setLoading(true);
         try {
-            let granted = false;
-
-            if (Platform.OS === 'android') {
-                const result = await PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
-                    {
-                        title: 'Permiso de Contactos',
-                        message: 'La app necesita acceder a tus contactos para seleccionar a tu gasero.',
-                        buttonPositive: 'Permitir',
-                        buttonNegative: 'Cancelar',
-                    },
-                );
-                granted = result === PermissionsAndroid.RESULTS.GRANTED;
-            } else {
-                const result = await Contacts.requestPermission();
-                granted = result === 'authorized';
-            }
+            const { status } = await ExpoContacts.requestPermissionsAsync();
+            const granted = status === 'granted';
 
             if (granted) {
                 const data = await Contacts.getAll();
@@ -102,6 +87,7 @@ export default function GaseroScreen() {
                     }));
                     setContacts(mapped);
                     setFilteredContacts(mapped);
+                    setLoading(false);
                     setShowPicker(true);
                 } else {
                     showAlert({
@@ -195,7 +181,7 @@ export default function GaseroScreen() {
         });
     };
 
-    const renderContact = ({ item }: { item: any }) => (
+    const renderContact = ({ item }: { item: ContactoMinimal }) => (
         <TouchableOpacity
             style={styles.contactItem}
             onPress={() => {
@@ -219,7 +205,7 @@ export default function GaseroScreen() {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.pickerHeader}>
-                    <TouchableOpacity onPress={() => setShowPicker(false)}>
+                    <TouchableOpacity onPress={() => { setShowPicker(false); setSearch(''); setLoading(false); }}>
                         <MaterialCommunityIcons name="close" size={28} color="#FFFFFF" />
                     </TouchableOpacity>
                     <Text style={styles.pickerTitle}>Seleccionar Contacto</Text>
@@ -382,7 +368,7 @@ const styles = StyleSheet.create({
     btnRemove: { marginTop: 20 },
     removeText: { color: '#F87171', fontSize: 12, fontWeight: '600', opacity: 0.8 },
     // Picker styles
-    pickerHeader: { flexDirection: 'row', alignItems: 'center', padding: 20, gap: 16 },
+    pickerHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 40, paddingBottom: 20, gap: 16 },
     pickerTitle: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
     searchBar: {
         flexDirection: 'row',

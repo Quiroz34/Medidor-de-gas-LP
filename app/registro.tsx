@@ -10,12 +10,13 @@ import {
     insertarLectura,
     obtenerConfiguracion,
     actualizarConfiguracion,
+    actualizarFactorUsuario,
     Configuracion,
     obtenerUltimasLecturas,
     Lectura
 } from '../services/database';
-import { porcentajeALitros, calcularNivelCarga, dineroALitros, validarCarga } from '../services/ai';
-import { fetchCurrentGasPrice } from '../services/priceService';
+import { porcentajeALitros, calcularNivelCarga, dineroALitros, validarCarga, calcularTasaPerfil } from '../services/ai';
+import { fetchGasPriceOnline } from '../services/priceService';
 
 import { useAlert } from '../services/alertContext';
 
@@ -26,7 +27,7 @@ export default function RegistroModal() {
     const [modoCarga, setModoCarga] = useState<'litros' | 'dinero'>('litros');
 
     // Estados para lectura
-    const [nivel, setNivel] = useState(50);
+    const [nivel, setNivel] = useState(0);
 
     // Estados para carga
     const [litrosCargados, setLitrosCargados] = useState('');
@@ -38,6 +39,7 @@ export default function RegistroModal() {
     const [notas, setNotas] = useState('');
     const [guardando, setGuardando] = useState(false);
     const [precioEsAuto, setPrecioEsAuto] = useState(false);
+    const [sinConexionPrecio, setSinConexionPrecio] = useState(false);
 
     useEffect(() => {
         obtenerConfiguracion().then(async cfg => {
@@ -46,11 +48,14 @@ export default function RegistroModal() {
             
             // Si está activo el autómata de precios, intentamos actualizar al abrir el modal de carga
             if (cfg.actualizar_precio_auto) {
-                const livePrice = await fetchCurrentGasPrice(cfg);
+                const livePrice = await fetchGasPriceOnline(cfg);
                 if (livePrice) {
                     setPrecioLitro(String(livePrice));
                     setPrecioEsAuto(true);
                     await actualizarConfiguracion({ precio_litro_actual: livePrice });
+                } else {
+                    // Sin internet: avisar al usuario que ingrese el precio manualmente
+                    setSinConexionPrecio(true);
                 }
             }
         });
@@ -80,6 +85,12 @@ export default function RegistroModal() {
         const esCarga = tipo === 'carga';
         let lts = 0;
         
+        // Validación lectura manual: no puede superar 100%
+        if (!esCarga && nivel > 100) {
+            showAlert({ title: 'Nivel inválido', message: 'El nivel no puede superar el 100% de la capacidad del tanque.', type: 'warning' });
+            return;
+        }
+
         if (esCarga) {
             if (modoCarga === 'litros') {
                 lts = parseFloat(litrosCargados);
@@ -95,6 +106,26 @@ export default function RegistroModal() {
                     return;
                 }
                 lts = dineroALitros(monto, precio);
+            }
+
+            // Validación carga: los litros ingresados no pueden exceder la capacidad del tanque
+            const litrosPrevios = config ? porcentajeALitros(nivelPrevio, config.capacidad_litros) : 0;
+            const espacioDisponible = config ? config.capacidad_litros - litrosPrevios : 0;
+            if (lts > config.capacidad_litros) {
+                showAlert({
+                    title: 'Carga excede la capacidad',
+                    message: `Los litros ingresados (${lts.toFixed(1)} L) superan la capacidad total de tu tanque (${config.capacidad_litros} L). Verifica la cantidad.`,
+                    type: 'error'
+                });
+                return;
+            }
+            if (lts > espacioDisponible) {
+                showAlert({
+                    title: 'Tanque lleno',
+                    message: `Tu tanque ya tiene ${litrosPrevios.toFixed(1)} L y su capacidad es ${config.capacidad_litros} L. Solo caben ${espacioDisponible.toFixed(1)} L más. Verifica la cantidad ingresada.`,
+                    type: 'warning'
+                });
+                return;
             }
         }
 
@@ -128,16 +159,20 @@ export default function RegistroModal() {
                     const tasaReal = consumoReal / diffDias;
                     
                     if (tasaReal > 0) {
-                        const tasaEsperada = config ? (await import('../services/ai')).calcularTasaPerfil(config) : 1;
+                        const tasaEsperada = config ? calcularTasaPerfil(config) : 1;
                         const factorObservado = tasaReal / (tasaEsperada || 1);
-                        
+
                         // Solo actualizar si el factor es razonable (evitar errores de captura)
                         if (factorObservado > 0.2 && factorObservado < 5) {
-                            const { actualizarFactorUsuario } = await import('../services/database');
                             await actualizarFactorUsuario(fechaInicio.getMonth(), factorObservado);
                         }
                     }
                 }
+            }
+
+            // Actualizar precio siempre que sea carga (antes de retornar)
+            if (esCarga && precioLitro) {
+                await actualizarConfiguracion({ precio_litro_actual: parseFloat(precioLitro) });
             }
 
             if (esCarga && lastLectura) {
@@ -159,10 +194,6 @@ export default function RegistroModal() {
                     });
                     return;
                 }
-            }
-
-            if (esCarga && precioLitro) {
-                await actualizarConfiguracion({ ...config, precio_litro_actual: parseFloat(precioLitro) });
             }
 
             router.back();
@@ -244,6 +275,11 @@ export default function RegistroModal() {
                                 maximumTrackTintColor="#1E3A5F"
                                 thumbTintColor={nivelColor}
                             />
+                            {nivelPrevio > 0 && (
+                                <Text style={styles.hintText}>
+                                    Nivel actual: {nivelPrevio}%
+                                </Text>
+                            )}
                             <View style={styles.quickPicks}>
                                 {[10, 20, 50, 80, 100].map((v) => (
                                     <TouchableOpacity
@@ -259,6 +295,14 @@ export default function RegistroModal() {
                     ) : (
                         /* MODO CARGA: Inputs Dinero/Litros */
                         <View style={styles.card}>
+                            {sinConexionPrecio && (
+                                <View style={styles.sinConexionBanner}>
+                                    <MaterialCommunityIcons name="wifi-off" size={18} color="#FACC15" />
+                                    <Text style={styles.sinConexionText}>
+                                        Sin conexión. Pregunta a {config?.gasero_nombre ? config.gasero_nombre : 'tu repartidor'} el precio por litro e ingrésalo manualmente.
+                                    </Text>
+                                </View>
+                            )}
                             <View style={styles.modoCargaTabs}>
                                 <TouchableOpacity
                                     style={[styles.modoTab, modoCarga === 'litros' && styles.modoTabActive]}
@@ -512,5 +556,23 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#4ADE80',
         fontWeight: '600',
+    },
+    sinConexionBanner: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+        backgroundColor: 'rgba(250, 204, 21, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(250, 204, 21, 0.3)',
+        borderRadius: 10,
+        padding: 10,
+        marginBottom: 14,
+    },
+    sinConexionText: {
+        flex: 1,
+        fontSize: 12,
+        color: '#FACC15',
+        fontWeight: '600',
+        lineHeight: 18,
     },
 });
